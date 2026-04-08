@@ -1,121 +1,179 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:orientation="vertical" android:layout_width="fill_parent"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="fill_parent"
     android:layout_height="fill_parent"
-    android:theme="@android:style/Theme.Holo">
-    <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:background="@color/background">
+
+    <android.support.v7.widget.Toolbar
+        android:id="@+id/toolbar"
+        style="@style/AppToolbar"
         android:layout_width="fill_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true">
-        <LinearLayout
-            android:orientation="vertical" android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:title="@string/settings" />
+
+    <LinearLayout
+        android:id="@+id/action_bar"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:background="@drawable/bg_input_panel"
+        android:gravity="right"
+        android:orientation="horizontal"
+        android:padding="12dp">
+
+        <Button
+            android:id="@+id/cancel"
+            style="@style/AppSecondaryButton"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:text="@android:string/cancel" />
+
+        <Button
+            android:id="@+id/ok"
+            style="@style/AppPrimaryButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="8dp"
+            android:text="@android:string/ok" />
+    </LinearLayout>
+
+    <ScrollView
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent"
+        android:layout_below="@id/toolbar"
+        android:layout_above="@id/action_bar"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
             android:padding="16dp">
 
             <TextView
-                android:layout_width="match_parent"
+                style="@style/AppSectionTitle"
+                android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
-                android:textStyle="bold"
-                android:textSize="20sp"
-                android:text="@string/settings"
-                android:paddingBottom="10dp"/>
+                android:layout_marginBottom="8dp"
+                android:text="@string/settings" />
 
             <Spinner
                 android:id="@+id/api_spinner"
                 android:layout_width="fill_parent"
-                android:layout_height="wrap_content"/>
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp" />
+
             <LinearLayout
-                android:layout_height="wrap_content" android:orientation="horizontal"
                 android:layout_width="fill_parent"
-                android:paddingBottom="23dp">
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="18dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
                 <EditText
+                    android:id="@+id/apiKey"
+                    style="@style/AppTextField"
                     android:layout_width="0dp"
-                    android:layout_height="fill_parent"
-                    android:hint="@string/enter_api_key"
-                    android:inputType="textPassword"
+                    android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:id="@+id/apiKey"/>
+                    android:hint="@string/enter_api_key"
+                    android:inputType="textPassword" />
 
                 <Button
                     android:id="@+id/from_file"
+                    style="@style/AppSecondaryButton"
                     android:layout_width="wrap_content"
-                    android:layout_height="fill_parent"
-                    android:text="@string/from_file">
-                </Button>
+                    android:layout_height="wrap_content"
+                    android:layout_marginLeft="8dp"
+                    android:text="@string/from_file" />
             </LinearLayout>
 
             <TextView
+                style="@style/AppSectionTitle"
                 android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/chat_model"
-                android:textStyle="bold"
-                android:textSize="16sp"/>
-            <Spinner
-                android:id="@+id/chat_spinner"
+                android:text="@string/selected_models" />
+
+            <LinearLayout
+                android:id="@+id/selected_models_button"
                 android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="16dp"/>
+                android:layout_marginBottom="16dp"
+                android:background="@drawable/bg_toolbar_selector"
+                android:gravity="center_vertical"
+                android:minHeight="52dp"
+                android:orientation="horizontal"
+                android:paddingLeft="16dp"
+                android:paddingTop="12dp"
+                android:paddingRight="16dp"
+                android:paddingBottom="12dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/selected_models"
+                        android:textColor="@color/textPrimary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/selected_models_summary"
+                        style="@style/AppMetaText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp" />
+                </LinearLayout>
+
+                <android.support.v7.widget.AppCompatImageButton
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:background="@android:color/transparent"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:padding="4dp"
+                    android:src="@drawable/ic_chevron_down" />
+            </LinearLayout>
 
             <TextView
+                style="@style/AppSectionTitle"
                 android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/thinking_model"
-                android:textStyle="bold"
-                android:textSize="16sp"/>
+                android:text="@string/thinking_model" />
+
             <Spinner
                 android:id="@+id/think_spinner"
                 android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"/>
+                android:layout_marginBottom="16dp" />
 
             <TextView
+                style="@style/AppSectionTitle"
                 android:layout_width="fill_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/update_delay"
-                android:textSize="16sp"/>
+                android:text="@string/update_delay" />
+
             <EditText
-                android:layout_width="105dp"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:inputType="number"
                 android:id="@+id/update_delay"
-                android:hint="100–1000"/>
-
-            <CheckBox
-                android:layout_width="wrap_content"
+                style="@style/AppTextField"
+                android:layout_width="120dp"
                 android:layout_height="wrap_content"
-                android:text="@string/shrink_thinking"
-                android:id="@+id/shrinkThinking"/>
-            <TextView
-                android:layout_width="fill_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/shrink_thinking_desc"
-                android:layout_marginBottom="8dp"/>
+                android:layout_marginBottom="16dp"
+                android:hint="100-1000"
+                android:inputType="number"
+                android:maxLines="1" />
 
             <Button
+                android:id="@+id/changeSystemPrompt"
+                style="@style/AppSecondaryButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/change_system"
-                android:id="@+id/changeSystemPrompt"/>
-
+                android:text="@string/change_system" />
         </LinearLayout>
     </ScrollView>
-
-    <LinearLayout
-        android:orientation="horizontal"
-        android:layout_width="fill_parent"
-        android:layout_height="wrap_content">
-        <Button
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@android:string/cancel"
-            android:id="@+id/cancel"/>
-        <Button
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@android:string/ok"
-            android:id="@+id/ok"/>
-    </LinearLayout>
-
-</LinearLayout>
+</RelativeLayout>

@@ -2,6 +2,26 @@
 <resources>
     <string name="app_name">numAi</string>
     <string name="about">О программе</string>
+    <string name="send_message">Отправить сообщение</string>
+    <string name="select_model">Выбрать модель</string>
+    <string name="model_label">Модель</string>
+    <string name="thinking_mode">Режим мышления</string>
+    <string name="selected_models">Выбранные модели</string>
+    <string name="show_all_models">Показывать все модели</string>
+    <string name="selected_models_all_summary">Показываются все модели</string>
+    <string name="selected_models_none_summary">Ничего не выбрано. Будут показаны все модели</string>
+    <string name="selected_models_count_summary">Выбрано моделей: %1$d</string>
+    <string name="reasoning_active_status">Думаю... %1$d с.</string>
+    <string name="reasoning_done_status">Думал %1$d с.</string>
+    <string name="empty_chat_prompt">Чем я могу помочь?</string>
+    <string name="chats">Чаты</string>
+    <string name="search_chats">Поиск по чатам</string>
+    <string name="new_chat">+ Новый чат</string>
+    <string name="current_chat">Текущий чат</string>
+    <string name="current_chat_hint">Активный диалог остаётся здесь</string>
+    <string name="chat_history_soon">Заглушка списка чатов</string>
+    <string name="chat_history_hint">Хранение и создание чатов появятся позже</string>
+    <string name="new_chat_soon">Создание нового чата пока не реализовано</string>
     <string name="api_key">API-ключ</string>
     <string name="api_key_error">Произошла ошибка, проверьте свой ключ.</string>
     <string name="api_key_setup">Настройка API-ключа</string>

@@ -1,19 +1,21 @@
 package io.github.gohoski.numai;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.Toolbar;
 import android.view.MotionEvent;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.ArrayAdapter;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.InputStream;
@@ -24,21 +26,26 @@ import java.util.Scanner;
  * Created by Gleb on 15.10.2025.
  */
 
-public class SettingsActivity extends Activity {
+public class SettingsActivity extends AppCompatActivity {
     Context context;
     ConfigManager config;
     ApiService api;
-    Spinner apiSpinner, chatSpinner, thinkSpinner;
+    Spinner apiSpinner, thinkSpinner;
     EditText keyText;
     boolean fetched = false;
-    CheckBox shrinkThink;
     String systemPrompt;
     EditText updateDelay;
+    TextView selectedModelsSummary;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
+        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        }
         context = this;
         config = ConfigManager.getInstance();
         final Config conf = config.getConfig();
@@ -48,9 +55,7 @@ public class SettingsActivity extends Activity {
         findViewById(R.id.cancel).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                Intent intent = new Intent(context, MainActivity.class);
-                startActivity(intent);
-                finish();
+                navigateToMain();
             }
         });
 
@@ -66,33 +71,18 @@ public class SettingsActivity extends Activity {
         keyText = (EditText) findViewById(R.id.apiKey);
         keyText.setText(conf.getApiKey());
 
-        chatSpinner = (Spinner) findViewById(R.id.chat_spinner);
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
-                this,
-                android.R.layout.simple_spinner_item,
-                new String[]{conf.getChatModel()}
-        );
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        chatSpinner.setAdapter(adapter);
-
         thinkSpinner = (Spinner) findViewById(R.id.think_spinner);
-        adapter = new ArrayAdapter<String>(
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
                 this,
                 android.R.layout.simple_spinner_item,
                 new String[]{conf.getThinkingModel()}
         );
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         thinkSpinner.setAdapter(adapter);
+        selectedModelsSummary = (TextView) findViewById(R.id.selected_models_summary);
+        applyCachedThinkingModels();
+        updateSelectedModelsSummary();
 
-        chatSpinner.setOnTouchListener(new View.OnTouchListener() {
-            public boolean onTouch(View v, MotionEvent event) {
-                if (event.getAction() == MotionEvent.ACTION_UP) {
-                    loadModels(chatSpinner);
-                    return true;
-                }
-                return false;
-            }
-        });
         thinkSpinner.setOnTouchListener(new View.OnTouchListener() {
             public boolean onTouch(View v, MotionEvent event) {
                 if (event.getAction() == MotionEvent.ACTION_UP) {
@@ -102,9 +92,12 @@ public class SettingsActivity extends Activity {
                 return false;
             }
         });
-
-        shrinkThink = (CheckBox) findViewById(R.id.shrinkThinking);
-        shrinkThink.setChecked(conf.getShrinkThink());
+        findViewById(R.id.selected_models_button).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                startActivity(new Intent(context, ModelVisibilityActivity.class));
+            }
+        });
         updateDelay = (EditText) findViewById(R.id.update_delay);
         updateDelay.setText(conf.getUpdateDelay()+"");
 
@@ -114,9 +107,9 @@ public class SettingsActivity extends Activity {
                 final String urlByName = ApiManager.getUrlByName(apiSpinner.getSelectedItem().toString());
                 if (conf.getBaseUrl().equals(urlByName)) {
                     config.setConfig(new Config(urlByName,
-                            keyText.getText().toString(), chatSpinner.getSelectedItem().toString(),
+                            keyText.getText().toString(), conf.getChatModel(),
                             thinkSpinner.getSelectedItem().toString(),
-                            shrinkThink.isChecked(), systemPrompt, Integer.parseInt(updateDelay.getText().toString())));
+                            conf.getShrinkThink(), systemPrompt, Integer.parseInt(updateDelay.getText().toString())));
                     Intent intent = new Intent(context, MainActivity.class);
                     startActivity(intent);
                     finish();
@@ -127,10 +120,15 @@ public class SettingsActivity extends Activity {
                     api.getModels(new ApiCallback<ArrayList<String>>() {
                         @Override
                         public void onSuccess(ArrayList<String> models) {
+                            config.setCachedModels(models);
+                            String currentChatModel = conf.getChatModel();
+                            if (currentChatModel == null || currentChatModel.length() == 0 || !models.contains(currentChatModel)) {
+                                currentChatModel = ModelSelector.selectChatModel(models);
+                            }
                             config.setConfig(new Config(urlByName,
-                                    keyText.getText().toString(), ModelSelector.selectChatModel(models),
+                                    keyText.getText().toString(), currentChatModel,
                                     ModelSelector.selectThinkingModel(models),
-                                    shrinkThink.isChecked(), systemPrompt, Integer.parseInt(updateDelay.getText().toString())));
+                                    conf.getShrinkThink(), systemPrompt, Integer.parseInt(updateDelay.getText().toString())));
                             loading.dismiss();
                             Intent intent = new Intent(context, MainActivity.class);
                             startActivity(intent);
@@ -188,6 +186,28 @@ public class SettingsActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        applyCachedThinkingModels();
+        updateSelectedModelsSummary();
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == android.R.id.home) {
+            navigateToMain();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void navigateToMain() {
+        Intent intent = new Intent(context, MainActivity.class);
+        startActivity(intent);
+        finish();
+    }
+
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == 2 && resultCode == RESULT_OK && data != null) {
             Uri uri = data.getData();
@@ -217,19 +237,9 @@ public class SettingsActivity extends Activity {
         api.getModels(new ApiCallback<ArrayList<String>>() {
             @Override
             public void onSuccess(ArrayList<String> result) {
-                ArrayAdapter<String> adapter = new ArrayAdapter<String>(
-                        context,
-                        android.R.layout.simple_spinner_item,
-                        result
-                );
-                adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-                chatSpinner.setAdapter(adapter);
-                thinkSpinner.setAdapter(adapter);
-                Config conf = config.getConfig();
-                chatSpinner.setSelection(result.indexOf(conf.getChatModel()));
-                thinkSpinner.setSelection(result.indexOf(conf.getThinkingModel()));
+                config.setCachedModels(result);
+                applyThinkingModels(result);
                 loading.dismiss();
-                fetched = true;
                 spinner.performClick();
             }
 
@@ -240,5 +250,40 @@ public class SettingsActivity extends Activity {
                 Toast.makeText(context, error.getMessage(), Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    private void applyCachedThinkingModels() {
+        ArrayList<String> cachedModels = config.getCachedModels();
+        if (!cachedModels.isEmpty()) {
+            applyThinkingModels(cachedModels);
+        }
+    }
+
+    private void applyThinkingModels(ArrayList<String> models) {
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+                context,
+                android.R.layout.simple_spinner_item,
+                models
+        );
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        thinkSpinner.setAdapter(adapter);
+        Config conf = config.getConfig();
+        int selectedIndex = models.indexOf(conf.getThinkingModel());
+        thinkSpinner.setSelection(selectedIndex >= 0 ? selectedIndex : 0);
+        fetched = !models.isEmpty();
+    }
+
+    private void updateSelectedModelsSummary() {
+        if (selectedModelsSummary == null) return;
+        if (config.getShowAllModels()) {
+            selectedModelsSummary.setText(R.string.selected_models_all_summary);
+            return;
+        }
+        int count = config.getSelectedChatModels().size();
+        if (count == 0) {
+            selectedModelsSummary.setText(R.string.selected_models_none_summary);
+        } else {
+            selectedModelsSummary.setText(getString(R.string.selected_models_count_summary, Integer.valueOf(count)));
+        }
     }
 }

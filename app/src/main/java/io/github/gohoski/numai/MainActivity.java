@@ -1,29 +1,47 @@
 package io.github.gohoski.numai;
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Looper;
+import android.provider.OpenableColumns;
 import android.text.ClipboardManager;
+import android.text.Editable;
+import android.text.TextWatcher;
+import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
+import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.ViewGroup;
 import android.widget.AbsListView;
 import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
+import android.widget.BaseAdapter;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.ToggleButton;
+import android.support.v4.view.PagerAdapter;
+import android.support.v4.view.ViewPager;
+import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.ListPopupWindow;
+import android.support.v7.widget.Toolbar;
+import android.widget.Scroller;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -44,36 +62,67 @@ import cc.nnproject.json.JSONObject;
  * To Public License, Version 2, as published by Sam Hocevar. See
  * http://www.wtfpl.net/ for more details.
  */
-public class MainActivity extends Activity {
+public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_PICK_IMAGE = 1;
 
     private ApiService apiService;
     private ConfigManager config;
 
+    private ViewPager mainPager;
+    private View chatsPage;
+    private View chatPage;
     private ListView msgList;
+    private ListView chatsList;
     private EditText input;
     private MessageAdapter adapter;
     private ImageButton sendBtn;
-    private ToggleButton thinkingToggle;
-    private ProgressBar progressBar;
-    private TextView imgCount;
+    private Spinner modelSelector;
+    private TextView emptyState;
     private ImageButton attachBtn;
+    private View attachmentPreviewStrip;
+    private LinearLayout attachmentPreviewContainer;
     private boolean autoScroll = true;
     private boolean isGenerating = false;
     private boolean isThinkingState = false;
+    private boolean thinkingEnabled = false;
     private InputStream currentStream;
     private volatile boolean isCancelled = false;
+    private boolean modelsFetched = false;
+    private boolean suppressModelSelection = false;
+    private ModelSelectorAdapter modelSelectorAdapter;
+    private final ArrayList<String> allChatModels = new ArrayList<String>();
     int UPDATE_DELAY_MS = 250;
 
     // Stream buffers
     private final StringBuilder thinkBuffer = new StringBuilder();
     private final StringBuilder contentBuffer = new StringBuilder();
     private final List<String> inputImages = new ArrayList<String>();
+    private final List<String> pendingAttachmentNames = new ArrayList<String>();
+    private final List<ComposeAction> composeActions = new ArrayList<ComposeAction>();
+    private final ArrayList<ChatListItem> chatListItems = new ArrayList<ChatListItem>();
+    private final Handler uiHandler = new Handler();
+    private Message activeAssistantMessage;
+    private long activeReasoningStartTime;
+    private Runnable reasoningTicker;
+    private Runnable responseLoaderTicker;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        LayoutInflater inflater = LayoutInflater.from(this);
+        chatsPage = inflater.inflate(R.layout.page_chat_list, null);
+        chatPage = inflater.inflate(R.layout.page_chat, null);
+        mainPager = (ViewPager) findViewById(R.id.main_pager);
+        mainPager.setAdapter(new MainPagerAdapter());
+        mainPager.setOffscreenPageLimit(1);
+        mainPager.setCurrentItem(1, false);
+
+        Toolbar toolbar = (Toolbar) chatPage.findViewById(R.id.toolbar);
+        setSupportActionBar(toolbar);
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayShowTitleEnabled(false);
+        }
         SSLDisabler.disableSSLCertificateChecking();
 
         config = ConfigManager.getInstance(this);
@@ -85,13 +134,20 @@ public class MainActivity extends Activity {
         UPDATE_DELAY_MS = config.getConfig().getUpdateDelay();
 
         apiService = new ApiService(this);
-        msgList = (ListView) findViewById(R.id.messages_list);
-        input = (EditText) findViewById(R.id.message_input);
-        sendBtn = (ImageButton) findViewById(R.id.send_button);
-        attachBtn = (ImageButton) findViewById(R.id.attach_button);
-        thinkingToggle = (ToggleButton) findViewById(R.id.thinking);
-        progressBar = (ProgressBar) findViewById(R.id.waiting);
-        imgCount = (TextView) findViewById(R.id.img_count);
+        msgList = (ListView) chatPage.findViewById(R.id.messages_list);
+        chatsList = (ListView) chatsPage.findViewById(R.id.chats_list);
+        input = (EditText) chatPage.findViewById(R.id.message_input);
+        sendBtn = (ImageButton) chatPage.findViewById(R.id.send_button);
+        attachBtn = (ImageButton) chatPage.findViewById(R.id.attach_button);
+        modelSelector = (Spinner) chatPage.findViewById(R.id.model_selector);
+        emptyState = (TextView) chatPage.findViewById(R.id.empty_state);
+        attachmentPreviewStrip = chatPage.findViewById(R.id.attachment_preview_strip);
+        attachmentPreviewContainer = (LinearLayout) chatPage.findViewById(R.id.attachment_preview_container);
+        restoreCachedChatModels();
+        setupComposeActions();
+        setupChatsPage();
+        setupModelSelector();
+        setupInputField();
 
         sendBtn.setOnClickListener(new OnClickListener() {
             public void onClick(View v) {
@@ -105,21 +161,16 @@ public class MainActivity extends Activity {
 
         attachBtn.setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
-                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
-                intent.setType("image/*");
-                startActivityForResult(Intent.createChooser(intent, getString(R.string.select_picture)), REQUEST_CODE_PICK_IMAGE);
+                showComposeActionsMenu();
             }
         });
 
         MessageManager.getInstance().clearMessages();
         adapter = new MessageAdapter(this, MessageManager.getInstance().getMessages());
         msgList.setAdapter(adapter);
-
-        if (config.getConfig().getShrinkThink()) {
-            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) thinkingToggle.getLayoutParams();
-            params.bottomMargin = (int) (3 * getResources().getDisplayMetrics().density + 0.5f);
-            thinkingToggle.setLayoutParams(params);
-        }
+        updateAttachmentPreview();
+        updateComposerState();
+        updateEmptyState();
 
         msgList.setOnScrollListener(new AbsListView.OnScrollListener() {
             public void onScrollStateChanged(android.widget.AbsListView view, int scrollState) {
@@ -140,6 +191,207 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        restoreCachedChatModels();
+        applyVisibleModelsToSelector();
+    }
+
+    private void setupInputField() {
+        input.setHorizontallyScrolling(false);
+        input.setScroller(new Scroller(this));
+        input.setVerticalScrollBarEnabled(true);
+        input.setMovementMethod(new ScrollingMovementMethod());
+        input.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            public void afterTextChanged(Editable editable) {
+                updateComposerState();
+            }
+        });
+    }
+
+    private void updateComposerState() {
+        boolean hasInput = input != null && input.getText() != null && input.getText().toString().trim().length() != 0;
+        boolean hasImages = !inputImages.isEmpty();
+        boolean canSend = !isGenerating && (hasInput || hasImages);
+        if (sendBtn != null) {
+            sendBtn.setEnabled(canSend || isGenerating);
+        }
+    }
+
+    private void updateEmptyState() {
+        if (emptyState == null) return;
+        emptyState.setVisibility(adapter != null && adapter.getCount() > 0 ? View.GONE : View.VISIBLE);
+    }
+
+    private void setupModelSelector() {
+        applyVisibleModelsToSelector();
+        modelSelector.setOnTouchListener(new View.OnTouchListener() {
+            public boolean onTouch(View view, MotionEvent motionEvent) {
+                if (motionEvent.getAction() == MotionEvent.ACTION_UP && !modelsFetched) {
+                    loadToolbarModels();
+                    return true;
+                }
+                return false;
+            }
+        });
+        modelSelector.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            public void onItemSelected(AdapterView<?> adapterView, View view, int position, long id) {
+                if (suppressModelSelection) {
+                    suppressModelSelection = false;
+                    return;
+                }
+                String selectedModel = (String) adapterView.getItemAtPosition(position);
+                if (selectedModel != null && selectedModel.length() != 0) {
+                    if (modelSelectorAdapter != null) {
+                        modelSelectorAdapter.setSelectedModel(selectedModel);
+                    }
+                    if (!selectedModel.equals(config.getConfig().getChatModel())) {
+                        config.updateChatModel(selectedModel);
+                    }
+                }
+            }
+
+            public void onNothingSelected(AdapterView<?> adapterView) {}
+        });
+    }
+
+    private void loadToolbarModels() {
+        final Loading loading = new Loading(this);
+        apiService.getModels(new ApiCallback<ArrayList<String>>() {
+            @Override
+            public void onSuccess(ArrayList<String> result) {
+                config.setCachedModels(result);
+                restoreCachedChatModels();
+                applyVisibleModelsToSelector();
+                modelsFetched = true;
+                loading.dismiss();
+                modelSelector.performClick();
+            }
+
+            @Override
+            public void onError(ApiError error) {
+                loading.dismiss();
+                Toast.makeText(MainActivity.this, error.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void restoreCachedChatModels() {
+        allChatModels.clear();
+        allChatModels.addAll(config.getCachedModels());
+        modelsFetched = !allChatModels.isEmpty();
+    }
+
+    private void setupComposeActions() {
+        composeActions.clear();
+        composeActions.add(new ComposeAction(R.id.action_attach_image, getString(R.string.select_picture), false));
+        composeActions.add(new ComposeAction(R.id.action_toggle_thinking, getString(R.string.thinking_mode), thinkingEnabled));
+    }
+
+    private void setupChatsPage() {
+        chatListItems.clear();
+        chatListItems.add(new ChatListItem(getString(R.string.current_chat), getString(R.string.current_chat_hint)));
+        chatListItems.add(new ChatListItem(getString(R.string.chat_history_soon), getString(R.string.chat_history_hint)));
+
+        chatsList.setAdapter(new ChatListAdapter());
+        chatsList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                mainPager.setCurrentItem(1, true);
+            }
+        });
+
+        View profileButton = chatsPage.findViewById(R.id.profile_button);
+        profileButton.setOnClickListener(new OnClickListener() {
+            public void onClick(View view) {
+                startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+            }
+        });
+
+        View newChatButton = chatsPage.findViewById(R.id.new_chat_button);
+        newChatButton.setOnClickListener(new OnClickListener() {
+            public void onClick(View view) {
+                Toast.makeText(MainActivity.this, R.string.new_chat_soon, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void showComposeActionsMenu() {
+        composeActions.get(1).checked = thinkingEnabled;
+        final ComposeActionsAdapter popupAdapter = new ComposeActionsAdapter();
+        final ListPopupWindow popupWindow = new ListPopupWindow(this);
+        popupWindow.setAnchorView(attachBtn);
+        popupWindow.setAdapter(popupAdapter);
+        popupWindow.setModal(true);
+        popupWindow.setBackgroundDrawable(getResources().getDrawable(R.drawable.bg_spinner_dropdown));
+        popupWindow.setContentWidth(dpToPx(220));
+        popupWindow.setDropDownGravity(Gravity.RIGHT);
+        popupWindow.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                ComposeAction action = composeActions.get(position);
+                popupWindow.dismiss();
+                if (action.id == R.id.action_attach_image) {
+                    openImagePicker();
+                } else if (action.id == R.id.action_toggle_thinking) {
+                    thinkingEnabled = !thinkingEnabled;
+                    action.checked = thinkingEnabled;
+                }
+            }
+        });
+        popupWindow.show();
+        ListView listView = popupWindow.getListView();
+        if (listView != null) {
+            listView.setDivider(null);
+            listView.setDividerHeight(0);
+        }
+    }
+
+    private void openImagePicker() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        startActivityForResult(Intent.createChooser(intent, getString(R.string.select_picture)), REQUEST_CODE_PICK_IMAGE);
+    }
+
+    private int dpToPx(int dp) {
+        float density = getResources().getDisplayMetrics().density;
+        return (int) (dp * density + 0.5f);
+    }
+
+    private void applyVisibleModelsToSelector() {
+        ArrayList<String> visibleModels;
+        if (allChatModels.isEmpty()) {
+            visibleModels = new ArrayList<String>();
+            String currentModel = config.getConfig().getChatModel();
+            if (currentModel != null && currentModel.length() != 0) {
+                visibleModels.add(currentModel);
+            }
+        } else {
+            visibleModels = config.getVisibleChatModels(allChatModels);
+        }
+
+        if (visibleModels.isEmpty()) {
+            String currentModel = config.getConfig().getChatModel();
+            if (currentModel != null && currentModel.length() != 0) {
+                visibleModels.add(currentModel);
+            }
+        }
+
+        String currentModel = config.getConfig().getChatModel();
+        if (!visibleModels.isEmpty() && !visibleModels.contains(currentModel)) {
+            currentModel = visibleModels.get(0);
+            config.updateChatModel(currentModel);
+        }
+
+        modelSelectorAdapter = new ModelSelectorAdapter(this, visibleModels);
+        modelSelectorAdapter.setSelectedModel(currentModel);
+        suppressModelSelection = true;
+        modelSelector.setAdapter(modelSelectorAdapter);
+        int selectedIndex = visibleModels.indexOf(currentModel);
+        modelSelector.setSelection(selectedIndex >= 0 ? selectedIndex : 0);
     }
 
     @Override
@@ -180,13 +432,76 @@ public class MainActivity extends Activity {
                 bitmap.recycle();
 
                 inputImages.add("data:image/jpeg;base64," + Base64.encode(bytes));
-                imgCount.setVisibility(View.VISIBLE);
-                imgCount.setText(String.valueOf(inputImages.size()));
+                pendingAttachmentNames.add(resolveAttachmentName(uri, pendingAttachmentNames.size() + 1));
+                updateAttachmentPreview();
+                updateComposerState();
             }
         } catch (Exception e) {
             e.printStackTrace();
             Toast.makeText(this, "Failed to load image", Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void updateAttachmentPreview() {
+        if (attachmentPreviewStrip == null || attachmentPreviewContainer == null) return;
+        attachmentPreviewContainer.removeAllViews();
+        if (pendingAttachmentNames.isEmpty()) {
+            attachmentPreviewStrip.setVisibility(View.GONE);
+            return;
+        }
+
+        attachmentPreviewStrip.setVisibility(View.VISIBLE);
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (int i = 0; i < pendingAttachmentNames.size(); i++) {
+            final int index = i;
+            View chip = inflater.inflate(R.layout.attachment_preview_chip, attachmentPreviewContainer, false);
+            TextView attachmentName = (TextView) chip.findViewById(R.id.attachment_name);
+            View removeButton = chip.findViewById(R.id.attachment_remove);
+            attachmentName.setText(pendingAttachmentNames.get(i));
+            removeButton.setOnClickListener(new OnClickListener() {
+                public void onClick(View view) {
+                    removePendingAttachment(index);
+                }
+            });
+            attachmentPreviewContainer.addView(chip);
+        }
+    }
+
+    private void removePendingAttachment(int index) {
+        if (index < 0 || index >= inputImages.size()) return;
+        inputImages.remove(index);
+        if (index < pendingAttachmentNames.size()) {
+            pendingAttachmentNames.remove(index);
+        }
+        updateAttachmentPreview();
+        updateComposerState();
+    }
+
+    private String resolveAttachmentName(Uri uri, int fallbackIndex) {
+        Cursor cursor = null;
+        try {
+            cursor = getContentResolver().query(uri, null, null, null, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameColumn != -1) {
+                    String displayName = cursor.getString(nameColumn);
+                    if (displayName != null && displayName.length() != 0) {
+                        return displayName;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+
+        String lastSegment = uri != null ? uri.getLastPathSegment() : null;
+        if (lastSegment != null && lastSegment.length() != 0) {
+            return lastSegment;
+        }
+        return getString(R.string.attachment_name_fallback, fallbackIndex);
     }
 
     private void scrollToBottom() {
@@ -205,6 +520,8 @@ public class MainActivity extends Activity {
 
     private void stopGeneration() {
         isCancelled = true;
+        stopReasoningTicker();
+        cancelResponseLoaderTicker();
 
 //        if (currentStream != null) {
 //            try {
@@ -228,6 +545,8 @@ public class MainActivity extends Activity {
         runOnUiThread(new Runnable() {
             public void run() {
                 adapter.notifyDataSetChanged();
+                updateEmptyState();
+                updateComposerState();
             }
         });
     }
@@ -240,27 +559,43 @@ public class MainActivity extends Activity {
         currentStream = null;
         MessageManager.getInstance().addMessage(new Message(Role.USER, text, new ArrayList<String>(inputImages), null));
         input.setText("");
-        sendBtn.setImageResource(R.drawable.ic_action_stop);
+        sendBtn.setImageResource(R.drawable.ic_stop_generation);
         input.setEnabled(false);
         attachBtn.setEnabled(false);
-        progressBar.setVisibility(View.VISIBLE);
+        modelSelector.setEnabled(false);
         inputImages.clear();
-        imgCount.setVisibility(View.GONE);
+        pendingAttachmentNames.clear();
+        updateAttachmentPreview();
         adapter.notifyDataSetChanged();
+        updateEmptyState();
+        updateComposerState();
+
+        final boolean thinkingEnabled = this.thinkingEnabled;
+        final Message pendingAssistant = new Message(Role.ASSISTANT, "", config.getConfig().getChatModel());
+        activeAssistantMessage = pendingAssistant;
+        activeReasoningStartTime = thinkingEnabled ? System.currentTimeMillis() : 0L;
+        MessageManager.getInstance().addMessage(pendingAssistant);
+        adapter.prepareAssistantMessage(pendingAssistant, thinkingEnabled);
+        if (thinkingEnabled) {
+            startReasoningTicker(pendingAssistant);
+        } else {
+            scheduleResponseLoaderTicker(pendingAssistant);
+        }
+        adapter.notifyDataSetChanged();
+        updateEmptyState();
         scrollToBottom();
 
         thinkBuffer.setLength(0);
         contentBuffer.setLength(0);
         isThinkingState = false;
         isGenerating = true;
-        final boolean thinkingEnabled = thinkingToggle.isChecked();
         apiService.chatCompletion(MessageManager.getInstance().getMessages(), thinkingEnabled, new ApiCallback<ApiResult>() {
             @Override
             public void onSuccess(final ApiResult apiResult) {
                 if (isCancelled)return;
                 runOnUiThread(new Runnable() {
                     public void run() {
-                        startResponseStream(apiResult.getResult(), apiResult.getModel(), thinkingEnabled);
+                        startResponseStream(apiResult.getResult(), apiResult.getModel(), thinkingEnabled, pendingAssistant);
                     }
                 });
             }
@@ -276,12 +611,23 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void startResponseStream(final InputStream stream, String model, final boolean thinkingEnabled) {
+    private void startResponseStream(final InputStream stream, String model, final boolean thinkingEnabled, Message message) {
         this.currentStream = stream;
-        progressBar.setVisibility(View.GONE);
-        final Message msg = new Message(Role.ASSISTANT, "", model);
-        MessageManager.getInstance().addMessage(msg);
+        final Message msg = message != null ? message : new Message(Role.ASSISTANT, "", model);
+        msg.setLlm(model);
+        if (message == null) {
+            activeAssistantMessage = msg;
+            activeReasoningStartTime = thinkingEnabled ? System.currentTimeMillis() : 0L;
+            MessageManager.getInstance().addMessage(msg);
+            adapter.prepareAssistantMessage(msg, thinkingEnabled);
+            if (thinkingEnabled) {
+                startReasoningTicker(msg);
+            } else {
+                scheduleResponseLoaderTicker(msg);
+            }
+        }
         adapter.notifyDataSetChanged();
+        updateEmptyState();
         new Thread(new Runnable() {
             public void run() {
                 try {
@@ -297,22 +643,32 @@ public class MainActivity extends Activity {
     }
 
     private void handleStreamError(String errorMsg) {
-        progressBar.setVisibility(View.GONE);
+        List<Message> messages = MessageManager.getInstance().getMessages();
+        if (activeAssistantMessage != null) {
+            messages.remove(activeAssistantMessage);
+        }
         Message error = new Message(Role.ASSISTANT, errorMsg, getString(R.string.error));
         error.setAsError();
         MessageManager.getInstance().addMessage(error);
+        updateEmptyState();
         resetUIState();
     }
 
     private void resetUIState() {
         isGenerating = false;
+        stopReasoningTicker();
+        cancelResponseLoaderTicker();
+        activeAssistantMessage = null;
+        activeReasoningStartTime = 0L;
         adapter.notifyDataSetChanged();
         autoScroll = true;
         scrollToBottom();
-        sendBtn.setImageResource(android.R.drawable.ic_menu_send);
+        sendBtn.setImageResource(R.drawable.ic_arrow_upward);
         input.setEnabled(true);
         attachBtn.setEnabled(true);
-        progressBar.setVisibility(View.GONE);
+        modelSelector.setEnabled(true);
+        updateComposerState();
+        updateEmptyState();
     }
 
     private void readStream(InputStream inputStream, final Message msg, final boolean thinkingEnabled) throws IOException {
@@ -402,43 +758,219 @@ public class MainActivity extends Activity {
         String displayContent = contentBuffer.toString();
         String displayThink = thinkBuffer.toString();
         msg.setContent(displayContent);
-        int firstVis = msgList.getFirstVisiblePosition();
-        int lastVis = msgList.getLastVisiblePosition();
-        int count = adapter.getCount();
-        int targetIndex = count - 1;
-        if (targetIndex >= firstVis && targetIndex <= lastVis) {
-            View view = msgList.getChildAt(targetIndex - firstVis);
-            if (view != null) {
-                TextView tvText = (TextView) view.findViewById(R.id.message_text);
-                LinearLayout thinkLayout = (LinearLayout) view.findViewById(R.id.thinkingLayout);
-                TextView tvThink = (TextView) view.findViewById(R.id.thinkingProcess);
-                View vResponse = view.findViewById(R.id.response);
-                if (tvText != null) tvText.setText(displayContent);
-                if (thinkingEnabled) {
-                    boolean hasThinkContent = displayThink.length() > 0;
-                    if (hasThinkContent) {
-                        thinkLayout.setVisibility(View.VISIBLE);
-                        view.findViewById(R.id.noThinking).setVisibility(View.GONE);
-                        tvThink.setText(displayThink);
-                        vResponse.setVisibility((displayContent.length() > 0 || isFinal) ? View.VISIBLE : View.GONE);
-                    } else {
-                        thinkLayout.setVisibility(View.VISIBLE);
-                        view.findViewById(R.id.noThinking).setVisibility(View.VISIBLE);
-                        vResponse.setVisibility(View.GONE);
-                    }
-
-                    if (isFinal && !hasThinkContent && displayContent.length() > 0) {
-                        thinkLayout.setVisibility(View.GONE);
-                        vResponse.setVisibility(View.VISIBLE);
-                    }
-                } else {
-                    vResponse.setVisibility(View.VISIBLE);
-                    if (thinkLayout != null) thinkLayout.setVisibility(View.GONE);
-                }
+        if (thinkingEnabled) {
+            adapter.setResponseLoaderVisible(msg, false);
+            adapter.updateReasoningState(msg, displayThink, true, !isFinal, getReasoningDurationSeconds());
+            if (isFinal) {
+                stopReasoningTicker();
             }
+        } else {
+            if (displayContent.length() > 0 || isFinal) {
+                cancelResponseLoaderTicker();
+                adapter.setResponseLoaderVisible(msg, false);
+            }
+            adapter.updateReasoningState(msg, "", false, false, 0);
+        }
+        adapter.notifyDataSetChanged();
+    }
+
+    private int getReasoningDurationSeconds() {
+        if (activeReasoningStartTime == 0L) {
+            return 0;
+        }
+        return (int) ((System.currentTimeMillis() - activeReasoningStartTime) / 1000L);
+    }
+
+    private void startReasoningTicker(final Message message) {
+        stopReasoningTicker();
+        reasoningTicker = new Runnable() {
+            public void run() {
+                if (!isGenerating || message != activeAssistantMessage) {
+                    return;
+                }
+                adapter.updateReasoningState(message, thinkBuffer.toString(), true, true, getReasoningDurationSeconds());
+                adapter.notifyDataSetChanged();
+                uiHandler.postDelayed(this, 1000L);
+            }
+        };
+        uiHandler.postDelayed(reasoningTicker, 1000L);
+    }
+
+    private void stopReasoningTicker() {
+        if (reasoningTicker != null) {
+            uiHandler.removeCallbacks(reasoningTicker);
+            reasoningTicker = null;
+        }
+    }
+
+    private void scheduleResponseLoaderTicker(final Message message) {
+        cancelResponseLoaderTicker();
+        responseLoaderTicker = new Runnable() {
+            public void run() {
+                if (!isGenerating || message != activeAssistantMessage || contentBuffer.length() != 0) {
+                    return;
+                }
+                adapter.setResponseLoaderVisible(message, true);
+                adapter.notifyDataSetChanged();
+            }
+        };
+        uiHandler.postDelayed(responseLoaderTicker, 180L);
+    }
+
+    private void cancelResponseLoaderTicker() {
+        if (responseLoaderTicker != null) {
+            uiHandler.removeCallbacks(responseLoaderTicker);
+            responseLoaderTicker = null;
+        }
+    }
+
+    private class MainPagerAdapter extends PagerAdapter {
+        public int getCount() {
+            return 2;
         }
 
-        if (autoScroll) scrollToBottom();
+        public boolean isViewFromObject(View view, Object object) {
+            return view == object;
+        }
+
+        public Object instantiateItem(ViewGroup container, int position) {
+            View page = position == 0 ? chatsPage : chatPage;
+            if (page.getParent() != null) {
+                ((ViewGroup) page.getParent()).removeView(page);
+            }
+            container.addView(page);
+            return page;
+        }
+
+        public void destroyItem(ViewGroup container, int position, Object object) {
+            container.removeView((View) object);
+        }
+    }
+
+    private static class ChatListItem {
+        final String title;
+        final String subtitle;
+
+        ChatListItem(String title, String subtitle) {
+            this.title = title;
+            this.subtitle = subtitle;
+        }
+    }
+
+    private class ChatListAdapter extends BaseAdapter {
+        public int getCount() {
+            return chatListItems.size();
+        }
+
+        public Object getItem(int position) {
+            return chatListItems.get(position);
+        }
+
+        public long getItemId(int position) {
+            return position;
+        }
+
+        public View getView(int position, View convertView, ViewGroup parent) {
+            View view = convertView;
+            if (view == null) {
+                view = getLayoutInflater().inflate(R.layout.item_chat_list_stub, parent, false);
+            }
+            TextView title = (TextView) view.findViewById(R.id.chat_item_title);
+            TextView subtitle = (TextView) view.findViewById(R.id.chat_item_subtitle);
+            ChatListItem item = chatListItems.get(position);
+            title.setText(item.title);
+            subtitle.setText(item.subtitle);
+            return view;
+        }
+    }
+
+    private static class ModelSelectorAdapter extends ArrayAdapter<String> {
+        private final LayoutInflater inflater;
+        private String selectedModel;
+
+        ModelSelectorAdapter(Context context, String[] models) {
+            super(context, R.layout.spinner_toolbar_item, models);
+            this.inflater = LayoutInflater.from(context);
+        }
+
+        ModelSelectorAdapter(Context context, List<String> models) {
+            super(context, R.layout.spinner_toolbar_item, models);
+            this.inflater = LayoutInflater.from(context);
+        }
+
+        void setSelectedModel(String selectedModel) {
+            this.selectedModel = selectedModel;
+            notifyDataSetChanged();
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            View view = super.getView(position, convertView, parent);
+            TextView title = (TextView) view.findViewById(android.R.id.text1);
+            if (title != null) {
+                title.setText(getItem(position));
+            }
+            return view;
+        }
+
+        @Override
+        public View getDropDownView(int position, View convertView, ViewGroup parent) {
+            View view = convertView;
+            if (view == null) {
+                view = inflater.inflate(R.layout.spinner_toolbar_dropdown_item, parent, false);
+            }
+            TextView title = (TextView) view.findViewById(android.R.id.text1);
+            ImageView check = (ImageView) view.findViewById(R.id.check_icon);
+            String model = getItem(position);
+            if (title != null) {
+                title.setText(model);
+            }
+            if (check != null) {
+                check.setVisibility(model != null && model.equals(selectedModel) ? View.VISIBLE : View.INVISIBLE);
+            }
+            return view;
+        }
+    }
+
+    private static class ComposeAction {
+        final int id;
+        final String title;
+        boolean checked;
+
+        ComposeAction(int id, String title, boolean checked) {
+            this.id = id;
+            this.title = title;
+            this.checked = checked;
+        }
+    }
+
+    private class ComposeActionsAdapter extends BaseAdapter {
+        private final LayoutInflater inflater = LayoutInflater.from(MainActivity.this);
+
+        public int getCount() {
+            return composeActions.size();
+        }
+
+        public Object getItem(int position) {
+            return composeActions.get(position);
+        }
+
+        public long getItemId(int position) {
+            return composeActions.get(position).id;
+        }
+
+        public View getView(int position, View convertView, ViewGroup parent) {
+            View view = convertView;
+            if (view == null) {
+                view = inflater.inflate(R.layout.spinner_toolbar_dropdown_item, parent, false);
+            }
+            TextView title = (TextView) view.findViewById(android.R.id.text1);
+            ImageView check = (ImageView) view.findViewById(R.id.check_icon);
+            ComposeAction action = composeActions.get(position);
+            title.setText(action.title);
+            check.setVisibility(action.checked ? View.VISIBLE : View.INVISIBLE);
+            return view;
+        }
     }
 
     public static Bitmap decodeSampledBitmap(Context ctx, Uri uri, int reqW, int reqH) throws IOException {
@@ -481,7 +1013,7 @@ public class MainActivity extends Activity {
         } catch (Exception e) {
             try {
                 return delta.getArray("reasoning_content").getObject(0).getString("thinking");
-            } catch(Exception _) {
+            } catch(Exception ignored) {
                 return null;
             }
         }

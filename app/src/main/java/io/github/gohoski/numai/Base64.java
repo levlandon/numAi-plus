@@ -7,6 +7,18 @@ package io.github.gohoski.numai;
  */
 class Base64 {
     private final static char[] ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".toCharArray();
+    private final static int[] DECODABET = new int[256];
+
+    static {
+        int i;
+        for (i = 0; i < DECODABET.length; i++) {
+            DECODABET[i] = -1;
+        }
+        for (i = 0; i < ALPHABET.length; i++) {
+            DECODABET[ALPHABET[i]] = i;
+        }
+        DECODABET['='] = -2;
+    }
     static String encode(byte[] source) {
         if (source == null) {
             return null;
@@ -45,5 +57,61 @@ class Base64 {
         }
 
         return new String(out);
-    } private Base64() {}
+    }
+
+    static byte[] decode(String source) {
+        if (source == null) {
+            return null;
+        }
+
+        StringBuffer clean = new StringBuffer(source.length());
+        for (int i = 0; i < source.length(); i++) {
+            char c = source.charAt(i);
+            if (c < DECODABET.length && (DECODABET[c] >= 0 || DECODABET[c] == -2)) {
+                clean.append(c);
+            }
+        }
+
+        int len = clean.length();
+        if (len == 0) {
+            return new byte[0];
+        }
+        if (len % 4 != 0) {
+            throw new IllegalArgumentException("Invalid Base64 input");
+        }
+
+        int padding = 0;
+        if (clean.charAt(len - 1) == '=') padding++;
+        if (clean.charAt(len - 2) == '=') padding++;
+
+        byte[] out = new byte[(len * 3) / 4 - padding];
+        int outIndex = 0;
+
+        for (int i = 0; i < len; i += 4) {
+            int c1 = DECODABET[clean.charAt(i)];
+            int c2 = DECODABET[clean.charAt(i + 1)];
+            int c3 = DECODABET[clean.charAt(i + 2)];
+            int c4 = DECODABET[clean.charAt(i + 3)];
+
+            int block = (c1 << 18) | (c2 << 12);
+            if (c3 >= 0) {
+                block |= c3 << 6;
+            }
+            if (c4 >= 0) {
+                block |= c4;
+            }
+
+            out[outIndex++] = (byte) ((block >> 16) & 0xFF);
+            if (c3 >= 0 && outIndex < out.length) {
+                out[outIndex++] = (byte) ((block >> 8) & 0xFF);
+            }
+            if (c4 >= 0 && outIndex < out.length) {
+                out[outIndex++] = (byte) (block & 0xFF);
+            }
+        }
+
+        return out;
+    }
+
+    private Base64() {}
 }

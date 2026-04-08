@@ -1,5 +1,126 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="@android:style/Theme">
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="android:windowBackground">@color/background</item>
+    </style>
+
+    <style name="AppToolbar" parent="Widget.AppCompat.Toolbar">
+        <item name="android:background">@color/colorPrimary</item>
+        <item name="android:minHeight">56dp</item>
+        <item name="titleTextColor">@android:color/white</item>
+        <item name="subtitleTextColor">@android:color/white</item>
+        <item name="android:elevation">4dp</item>
+    </style>
+
+    <style name="ChatToolbar" parent="Widget.AppCompat.Toolbar">
+        <item name="android:background">@drawable/bg_toolbar_surface</item>
+        <item name="android:minHeight">60dp</item>
+        <item name="android:elevation">0dp</item>
+        <item name="contentInsetStartWithNavigation">0dp</item>
+        <item name="contentInsetStart">0dp</item>
+        <item name="contentInsetEnd">0dp</item>
+    </style>
+
+    <style name="AppPrimaryButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/bg_button_primary</item>
+        <item name="android:textColor">@android:color/white</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:paddingLeft">18dp</item>
+        <item name="android:paddingTop">10dp</item>
+        <item name="android:paddingRight">18dp</item>
+        <item name="android:paddingBottom">10dp</item>
+        <item name="textAllCaps">false</item>
+    </style>
+
+    <style name="AppSecondaryButton" parent="Widget.AppCompat.Button">
+        <item name="android:background">@drawable/bg_button_secondary</item>
+        <item name="android:textColor">@color/colorPrimary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:paddingLeft">18dp</item>
+        <item name="android:paddingTop">10dp</item>
+        <item name="android:paddingRight">18dp</item>
+        <item name="android:paddingBottom">10dp</item>
+        <item name="textAllCaps">false</item>
+    </style>
+
+    <style name="AppTextField" parent="Widget.AppCompat.EditText">
+        <item name="android:background">@drawable/bg_input</item>
+        <item name="android:textColor">@color/textPrimary</item>
+        <item name="android:textColorHint">@color/textSecondary</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:paddingLeft">14dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingRight">14dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:minHeight">48dp</item>
+    </style>
+
+    <style name="AppIconButton">
+        <item name="android:background">@drawable/bg_icon_button</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:padding">12dp</item>
+        <item name="android:scaleType">centerInside</item>
+    </style>
+
+    <style name="AppToggleButton">
+        <item name="android:background">@drawable/bg_button_secondary</item>
+        <item name="android:textColor">@color/colorPrimary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">40dp</item>
+        <item name="android:paddingLeft">14dp</item>
+        <item name="android:paddingRight">14dp</item>
+    </style>
+
+    <style name="AppScreenTitle">
+        <item name="android:textColor">@color/textPrimary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">22sp</item>
+    </style>
+
+    <style name="AppSectionTitle">
+        <item name="android:textColor">@color/textPrimary</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="AppBodyText">
+        <item name="android:textColor">@color/textPrimary</item>
+        <item name="android:textSize">15sp</item>
+        <item name="android:lineSpacingExtra">2dp</item>
+    </style>
+
+    <style name="AppMetaText">
+        <item name="android:textColor">@color/textSecondary</item>
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <style name="AppMessageCard" parent="CardView">
+        <item name="cardCornerRadius">14dp</item>
+        <item name="cardElevation">2dp</item>
+        <item name="cardUseCompatPadding">true</item>
+        <item name="contentPadding">14dp</item>
+    </style>
+
+    <style name="AppUserMessageCard" parent="AppMessageCard">
+        <item name="cardBackgroundColor">@color/messageUser</item>
+        <item name="contentPadding">10dp</item>
+        <item name="cardElevation">0dp</item>
+    </style>
+
+    <style name="AppAssistantMessageCard" parent="AppMessageCard">
+        <item name="cardBackgroundColor">@color/messageAssistant</item>
+    </style>
+
+    <style name="AppThinkingMessageCard" parent="AppMessageCard">
+        <item name="cardBackgroundColor">@android:color/transparent</item>
+        <item name="cardElevation">0dp</item>
+        <item name="cardUseCompatPadding">false</item>
+        <item name="contentPadding">0dp</item>
     </style>
 </resources>

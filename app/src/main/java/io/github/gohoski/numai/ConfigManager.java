@@ -16,7 +16,11 @@ class ConfigManager {
         KEY_THINKING_MODEL = "thinkingModel",
         KEY_SHRINK_THINK = "shrinkThink",
         KEY_SYSTEM_PROMPT = "systemPrompt",
-        KEY_UPDATE_DELAY = "updateDelay";
+        KEY_UPDATE_DELAY = "updateDelay",
+        KEY_SHOW_ALL_MODELS = "showAllModels",
+        KEY_SELECTED_MODELS = "selectedModels",
+        KEY_CACHED_MODELS = "cachedModels",
+        KEY_CACHED_MODELS_URL = "cachedModelsUrl";
 
     private static ConfigManager instance;
     private final SharedPreferences preferences;
@@ -95,6 +99,95 @@ class ConfigManager {
     void updateSystemPrompt(String systemPrompt) {
         config.setSystemPrompt(systemPrompt);
         saveConfig();
+    }
+
+    boolean getShowAllModels() {
+        return preferences.getBoolean(KEY_SHOW_ALL_MODELS, true);
+    }
+
+    void setShowAllModels(boolean showAllModels) {
+        preferences.edit().putBoolean(KEY_SHOW_ALL_MODELS, showAllModels).commit();
+    }
+
+    java.util.ArrayList<String> getSelectedChatModels() {
+        return parseStoredModels(preferences.getString(KEY_SELECTED_MODELS, ""));
+    }
+
+    void setSelectedChatModels(java.util.List<String> models) {
+        preferences.edit().putString(KEY_SELECTED_MODELS, joinModels(models)).commit();
+    }
+
+    java.util.ArrayList<String> getCachedModels() {
+        String cachedBaseUrl = preferences.getString(KEY_CACHED_MODELS_URL, "");
+        if (cachedBaseUrl == null || !cachedBaseUrl.equals(config.getBaseUrl())) {
+            return new java.util.ArrayList<String>();
+        }
+        return parseStoredModels(preferences.getString(KEY_CACHED_MODELS, ""));
+    }
+
+    void setCachedModels(java.util.List<String> models) {
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putString(KEY_CACHED_MODELS_URL, config.getBaseUrl());
+        editor.putString(KEY_CACHED_MODELS, joinModels(models));
+        editor.commit();
+    }
+
+    private java.util.ArrayList<String> parseStoredModels(String raw) {
+        java.util.ArrayList<String> models = new java.util.ArrayList<String>();
+        if (raw == null || raw.length() == 0) {
+            return models;
+        }
+        String[] parts = raw.split("\n");
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i] != null && parts[i].trim().length() != 0) {
+                models.add(parts[i]);
+            }
+        }
+        return models;
+    }
+
+    private String joinModels(java.util.List<String> models) {
+        StringBuffer buffer = new StringBuffer();
+        if (models != null) {
+            for (int i = 0; i < models.size(); i++) {
+                String model = models.get(i);
+                if (model == null || model.trim().length() == 0) continue;
+                if (buffer.length() > 0) {
+                    buffer.append('\n');
+                }
+                buffer.append(model);
+            }
+        }
+        return buffer.toString();
+    }
+
+    java.util.ArrayList<String> getVisibleChatModels(java.util.List<String> allModels) {
+        java.util.ArrayList<String> visibleModels = new java.util.ArrayList<String>();
+        if (allModels == null || allModels.isEmpty()) {
+            return visibleModels;
+        }
+
+        if (getShowAllModels()) {
+            visibleModels.addAll(allModels);
+            return visibleModels;
+        }
+
+        java.util.ArrayList<String> selectedModels = getSelectedChatModels();
+        if (selectedModels.isEmpty()) {
+            visibleModels.addAll(allModels);
+            return visibleModels;
+        }
+
+        for (int i = 0; i < allModels.size(); i++) {
+            String model = allModels.get(i);
+            if (selectedModels.contains(model)) {
+                visibleModels.add(model);
+            }
+        }
+        if (visibleModels.isEmpty()) {
+            visibleModels.addAll(allModels);
+        }
+        return visibleModels;
     }
 
     public boolean isConfigValid() {

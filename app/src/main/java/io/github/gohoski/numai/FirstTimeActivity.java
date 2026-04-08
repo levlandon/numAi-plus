@@ -1,6 +1,5 @@
 package io.github.gohoski.numai;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -9,6 +8,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.support.v7.app.AppCompatActivity;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Log;
@@ -37,7 +37,7 @@ import java.util.Scanner;
  * First-time setup for the API key, which contains a user-friendly guide.
  */
 
-public class FirstTimeActivity extends Activity {
+public class FirstTimeActivity extends AppCompatActivity {
     private ViewFlipper viewFlipper;
     private String apiKey="";
     private ApiService apiService;

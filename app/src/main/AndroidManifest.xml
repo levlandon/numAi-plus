@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="io.github.gohoski.numai">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-sdk tools:overrideLibrary="android.support.compat,android.support.coreui,android.support.coreutils,android.support.fragment,android.support.graphics.drawable,android.support.graphics.drawable.animated,android.support.mediacompat,android.support.v4,android.support.v7.appcompat,android.support.v7.cardview" />
     <application
         android:allowBackup="true"
         android:icon="@drawable/main_icon"
@@ -24,6 +26,9 @@
             android:configChanges="orientation"
             android:screenOrientation="portrait"/>
         <activity android:name=".SettingsActivity"
+            android:configChanges="orientation"
+            android:screenOrientation="portrait"/>
+        <activity android:name=".ModelVisibilityActivity"
             android:configChanges="orientation"
             android:screenOrientation="portrait"/>
     </application>

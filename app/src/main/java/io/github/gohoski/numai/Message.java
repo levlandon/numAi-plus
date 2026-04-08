@@ -41,6 +41,10 @@ class Message {
         return llm;
     }
 
+    void setLlm(String llm) {
+        this.llm = llm;
+    }
+
     List<String> getInputImages() {
         return inputImages;
     }

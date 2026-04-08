@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/action_attach_image"
+        android:title="@string/select_picture" />
+    <item
+        android:id="@+id/action_toggle_thinking"
+        android:checkable="true"
+        android:title="@string/thinking_mode" />
+</menu>
