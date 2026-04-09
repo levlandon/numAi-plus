@@ -216,6 +216,7 @@ class MessageAdapter extends ArrayAdapter<Message> {
             holder.thinkingStatus = (TextView) convertView.findViewById(R.id.thinking_status);
             holder.thinkingToggleIcon = (ImageButton) convertView.findViewById(R.id.thinking_toggle_icon);
             holder.thinkingProcess = (TextView) convertView.findViewById(R.id.thinkingProcess);
+            holder.responseLoaderHost = convertView.findViewById(R.id.response_loader_host);
             holder.responseLoader = convertView.findViewById(R.id.response_loader);
             holder.response = convertView.findViewById(R.id.response);
             holder.actions = convertView.findViewById(R.id.response_actions);
@@ -247,12 +248,14 @@ class MessageAdapter extends ArrayAdapter<Message> {
         boolean showLoader = !state.reasoningEnabled && state.showResponseLoader && displayContent.length() == 0;
         if (showLoader) {
             Animation pulse = AnimationUtils.loadAnimation(context, R.anim.pulse);
+            holder.responseLoaderHost.setVisibility(View.VISIBLE);
             holder.responseLoader.setVisibility(View.VISIBLE);
             holder.responseLoader.startAnimation(pulse);
             holder.messageText.setVisibility(View.GONE);
         } else {
             holder.responseLoader.clearAnimation();
             holder.responseLoader.setVisibility(View.GONE);
+            holder.responseLoaderHost.setVisibility(View.GONE);
             holder.messageText.setVisibility(displayContent.length() == 0 ? View.GONE : View.VISIBLE);
         }
         bindResponseActions(position, holder, message, state, displayContent, showLoader);
@@ -479,6 +482,7 @@ class MessageAdapter extends ArrayAdapter<Message> {
         TextView thinkingStatus;
         ImageButton thinkingToggleIcon;
         TextView thinkingProcess;
+        View responseLoaderHost;
         View responseLoader;
         View response;
         View actions;

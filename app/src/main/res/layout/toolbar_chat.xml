@@ -15,19 +15,11 @@
         android:layout_weight="2"
         android:background="@drawable/bg_toolbar_selector"
         android:gravity="center_vertical"
-        android:orientation="vertical"
+        android:orientation="horizontal"
         android:paddingLeft="14dp"
-        android:paddingTop="5dp"
+        android:paddingTop="0dp"
         android:paddingRight="8dp"
-        android:paddingBottom="4dp">
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/model_label"
-            android:textColor="@color/textSecondary"
-            android:textSize="10sp"
-            android:textStyle="bold" />
+        android:paddingBottom="0dp">
 
         <Spinner
             android:id="@+id/model_selector"

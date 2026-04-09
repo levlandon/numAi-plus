@@ -18,7 +18,6 @@ import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
-import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
@@ -113,6 +112,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean ttsReady = false;
     private boolean ttsInitializing = false;
     private Message speakingMessage;
+    private Message editingMessage;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -169,7 +169,11 @@ public class MainActivity extends AppCompatActivity {
 
         attachBtn.setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
-                showComposeActionsMenu();
+                if (editingMessage != null) {
+                    cancelEditMode();
+                } else {
+                    showComposeActionsMenu();
+                }
             }
         });
 
@@ -239,6 +243,7 @@ public class MainActivity extends AppCompatActivity {
         if (sendBtn != null) {
             sendBtn.setEnabled(canSend || isGenerating);
         }
+        updateEditModeUi();
     }
 
     private void updateEmptyState() {
@@ -412,11 +417,7 @@ public class MainActivity extends AppCompatActivity {
         modelSelector.setSelection(selectedIndex >= 0 ? selectedIndex : 0);
     }
 
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.menu, menu);
-        return true;
-    }
+    
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
@@ -483,6 +484,7 @@ public class MainActivity extends AppCompatActivity {
             });
             attachmentPreviewContainer.addView(chip);
         }
+        updateEditModeUi();
     }
 
     private void removePendingAttachment(int index) {
@@ -547,15 +549,16 @@ public class MainActivity extends AppCompatActivity {
 //            } catch (IOException e) {e.printStackTrace();}
 //        }
 
-        //Remove the messages from the data source
         List<Message> msgs = MessageManager.getInstance().getMessages();
-        int size = msgs.size();
-        if (size > 0 && msgs.get(size - 1).getRole().equals(Role.ASSISTANT.toString())) {
-            msgs.remove(size - 1);
-            size--;
-        }
-        if (removeLastUserOnStop && size > 0 && msgs.get(size - 1).getRole().equals(Role.USER.toString())) {
-            msgs.remove(size - 1);
+        if (activeAssistantMessage != null) {
+            adapter.setResponseLoaderVisible(activeAssistantMessage, false);
+            adapter.setResponseComplete(activeAssistantMessage, true);
+            String partialContent = activeAssistantMessage.getContent();
+            boolean hasPartialText = partialContent != null && partialContent.trim().length() != 0;
+            boolean hasReasoning = thinkBuffer.length() != 0;
+            if (!hasPartialText && !hasReasoning) {
+                msgs.remove(activeAssistantMessage);
+            }
         }
         resetUIState();
 
@@ -575,7 +578,11 @@ public class MainActivity extends AppCompatActivity {
         autoScroll = true;
         isCancelled = false;
         currentStream = null;
-        MessageManager.getInstance().addMessage(new Message(Role.USER, text, new ArrayList<String>(inputImages), null));
+        ArrayList<String> imagesToSend = new ArrayList<String>(inputImages);
+        if (editingMessage != null) {
+            trimMessagesForEdit(editingMessage);
+        }
+        MessageManager.getInstance().addMessage(new Message(Role.USER, text, imagesToSend, null));
         input.setText("");
         sendBtn.setImageResource(R.drawable.ic_stop_generation);
         input.setEnabled(false);
@@ -583,6 +590,7 @@ public class MainActivity extends AppCompatActivity {
         modelSelector.setEnabled(false);
         inputImages.clear();
         pendingAttachmentNames.clear();
+        editingMessage = null;
         updateAttachmentPreview();
         adapter.notifyDataSetChanged();
         updateEmptyState();
@@ -652,7 +660,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestAssistantResponse(final boolean thinkingEnabled, boolean rollbackUserOnStop) {
         removeLastUserOnStop = rollbackUserOnStop;
+        isGenerating = true;
         sendBtn.setImageResource(R.drawable.ic_stop_generation);
+        sendBtn.setEnabled(true);
         input.setEnabled(false);
         attachBtn.setEnabled(false);
         modelSelector.setEnabled(false);
@@ -675,7 +685,6 @@ public class MainActivity extends AppCompatActivity {
         thinkBuffer.setLength(0);
         contentBuffer.setLength(0);
         isThinkingState = false;
-        isGenerating = true;
         apiService.chatCompletion(MessageManager.getInstance().getMessages(), thinkingEnabled, new ApiCallback<ApiResult>() {
             @Override
             public void onSuccess(final ApiResult apiResult) {
@@ -708,6 +717,7 @@ public class MainActivity extends AppCompatActivity {
         final ArrayList<String> actions = new ArrayList<String>();
         actions.add(getString(R.string.copy_action));
         actions.add(getString(R.string.select_text_action));
+        actions.add(getString(R.string.edit_message_action));
 
         final ListPopupWindow popupWindow = new ListPopupWindow(this);
         popupWindow.setAnchorView(anchor);
@@ -723,6 +733,8 @@ public class MainActivity extends AppCompatActivity {
                     copyAssistantMessage(message);
                 } else if (position == 1) {
                     showSelectableTextDialog(message.getContent());
+                } else if (position == 2) {
+                    startEditMode(message);
                 }
             }
         });
@@ -746,6 +758,61 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         dialog.show();
+    }
+
+    private void startEditMode(Message message) {
+        if (message == null || !message.isSent() || isGenerating) {
+            return;
+        }
+        editingMessage = message;
+        input.setText(message.getContent() != null ? message.getContent() : "");
+        input.setSelection(input.getText().length());
+        inputImages.clear();
+        pendingAttachmentNames.clear();
+        List<String> images = message.getInputImages();
+        if (images != null) {
+            for (int i = 0; i < images.size(); i++) {
+                inputImages.add(images.get(i));
+                pendingAttachmentNames.add(getString(R.string.attachment_name_fallback, Integer.valueOf(i + 1)));
+            }
+        }
+        updateAttachmentPreview();
+        updateComposerState();
+        input.requestFocus();
+    }
+
+    private void cancelEditMode() {
+        editingMessage = null;
+        input.setText("");
+        inputImages.clear();
+        pendingAttachmentNames.clear();
+        updateAttachmentPreview();
+        updateComposerState();
+    }
+
+    private void trimMessagesForEdit(Message targetMessage) {
+        List<Message> messages = MessageManager.getInstance().getMessages();
+        int targetIndex = messages.indexOf(targetMessage);
+        if (targetIndex == -1) {
+            return;
+        }
+        stopSpeakingMessage(null);
+        while (messages.size() > targetIndex) {
+            messages.remove(targetIndex);
+        }
+    }
+
+    private void updateEditModeUi() {
+        if (attachBtn == null) {
+            return;
+        }
+        if (editingMessage != null) {
+            attachBtn.setImageResource(R.drawable.ic_close);
+            attachBtn.setContentDescription(getString(R.string.cancel_edit_action));
+        } else {
+            attachBtn.setImageResource(R.drawable.ic_add);
+            attachBtn.setContentDescription(getString(R.string.select_picture));
+        }
     }
 
     private void regenerateAssistantMessage(Message message) {
