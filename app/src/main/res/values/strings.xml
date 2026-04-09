@@ -44,6 +44,15 @@
     <string name="chat_history_soon">Chat history UI placeholder</string>
     <string name="chat_history_hint">Storage and creation will be added later</string>
     <string name="new_chat_soon">New chat creation is not implemented yet</string>
+    <string name="untitled_chat">New chat</string>
+    <string name="empty_chat_hint">No messages yet</string>
+    <string name="rename_chat_action">Rename chat</string>
+    <string name="delete_chat_action">Delete chat</string>
+    <string name="delete_chat_confirm">Delete this chat and its messages?</string>
+    <string name="time_just_now">Just now</string>
+    <string name="time_minutes_ago">%1$d min ago</string>
+    <string name="time_hours_ago">%1$d h ago</string>
+    <string name="time_yesterday">Yesterday</string>
     <string name="shrink_thinking">Shrink the Thinking button</string>
     <string name="shrink_thinking_desc">In some Android 2.x UIs, a ToggleButton may be taller than a regular button, causing the interface to look slightly uneven. This option attempts to fix this issue (though not ideally).</string>
     <string name="chat_model">Chat model</string>

@@ -1,6 +1,8 @@
 package io.github.gohoski.numai;
 
+import android.app.AlertDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -15,6 +17,7 @@ import android.text.ClipboardManager;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.text.method.ScrollingMovementMethod;
+import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -32,6 +35,7 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListAdapter;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -48,6 +52,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.Date;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -69,12 +74,14 @@ public class MainActivity extends AppCompatActivity {
 
     private ApiService apiService;
     private ConfigManager config;
+    private ChatRepository chatRepository;
 
     private ViewPager mainPager;
     private View chatsPage;
     private View chatPage;
     private ListView msgList;
     private ListView chatsList;
+    private EditText chatSearch;
     private EditText input;
     private MessageAdapter adapter;
     private ImageButton sendBtn;
@@ -93,6 +100,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean suppressModelSelection = false;
     private ModelSelectorAdapter modelSelectorAdapter;
     private final ArrayList<String> allChatModels = new ArrayList<String>();
+    private long activeChatId = -1L;
     int UPDATE_DELAY_MS = 250;
 
     // Stream buffers
@@ -101,7 +109,7 @@ public class MainActivity extends AppCompatActivity {
     private final List<String> inputImages = new ArrayList<String>();
     private final List<String> pendingAttachmentNames = new ArrayList<String>();
     private final List<ComposeAction> composeActions = new ArrayList<ComposeAction>();
-    private final ArrayList<ChatListItem> chatListItems = new ArrayList<ChatListItem>();
+    private final ArrayList<ChatRecord> chatListItems = new ArrayList<ChatRecord>();
     private final Handler uiHandler = new Handler();
     private Message activeAssistantMessage;
     private long activeReasoningStartTime;
@@ -134,6 +142,7 @@ public class MainActivity extends AppCompatActivity {
         SSLDisabler.disableSSLCertificateChecking();
 
         config = ConfigManager.getInstance(this);
+        chatRepository = ChatRepository.getInstance(this);
         if (config.getConfig().getApiKey().length() == 0) {
             startActivity(new Intent(this, FirstTimeActivity.class));
             finish();
@@ -144,6 +153,7 @@ public class MainActivity extends AppCompatActivity {
         apiService = new ApiService(this);
         msgList = (ListView) chatPage.findViewById(R.id.messages_list);
         chatsList = (ListView) chatsPage.findViewById(R.id.chats_list);
+        chatSearch = (EditText) chatsPage.findViewById(R.id.chat_search);
         input = (EditText) chatPage.findViewById(R.id.message_input);
         sendBtn = (ImageButton) chatPage.findViewById(R.id.send_button);
         attachBtn = (ImageButton) chatPage.findViewById(R.id.attach_button);
@@ -200,7 +210,9 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         msgList.setAdapter(adapter);
+        initializeActiveChat();
         updateAttachmentPreview();
+        refreshChatList();
         updateComposerState();
         updateEmptyState();
 
@@ -220,6 +232,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         restoreCachedChatModels();
         applyVisibleModelsToSelector();
+        refreshChatList();
     }
 
     private void setupInputField() {
@@ -276,6 +289,7 @@ public class MainActivity extends AppCompatActivity {
                     if (!selectedModel.equals(config.getConfig().getChatModel())) {
                         config.updateChatModel(selectedModel);
                     }
+                    syncActiveChatDefaults();
                 }
             }
 
@@ -317,16 +331,33 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupChatsPage() {
-        chatListItems.clear();
-        chatListItems.add(new ChatListItem(getString(R.string.current_chat), getString(R.string.current_chat_hint)));
-        chatListItems.add(new ChatListItem(getString(R.string.chat_history_soon), getString(R.string.chat_history_hint)));
-
         chatsList.setAdapter(new ChatListAdapter());
         chatsList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                mainPager.setCurrentItem(1, true);
+                ChatRecord record = chatListItems.get(position);
+                openChat(record.getChatId(), true);
             }
         });
+        chatsList.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
+                showChatContextMenu(view, chatListItems.get(position));
+                return true;
+            }
+        });
+
+        if (chatSearch != null) {
+            chatSearch.setFocusable(true);
+            chatSearch.setFocusableInTouchMode(true);
+            chatSearch.setClickable(true);
+            chatSearch.setCursorVisible(true);
+            chatSearch.addTextChangedListener(new TextWatcher() {
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                public void onTextChanged(CharSequence s, int start, int before, int count) {}
+                public void afterTextChanged(Editable editable) {
+                    refreshChatList();
+                }
+            });
+        }
 
         View profileButton = chatsPage.findViewById(R.id.profile_button);
         profileButton.setOnClickListener(new OnClickListener() {
@@ -338,9 +369,193 @@ public class MainActivity extends AppCompatActivity {
         View newChatButton = chatsPage.findViewById(R.id.new_chat_button);
         newChatButton.setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
-                Toast.makeText(MainActivity.this, R.string.new_chat_soon, Toast.LENGTH_SHORT).show();
+                startNewDraftChat(true);
             }
         });
+    }
+
+    private void initializeActiveChat() {
+        long storedActiveChatId = config.getActiveChatId();
+        if (storedActiveChatId > 0L) {
+            ChatRecord storedChat = chatRepository.getChat(storedActiveChatId);
+            if (storedChat != null) {
+                openChat(storedActiveChatId, false);
+                return;
+            }
+            clearCurrentChat();
+            return;
+        }
+        clearCurrentChat();
+    }
+
+    private void clearCurrentChat() {
+        activeChatId = -1L;
+        MessageManager.getInstance().setCurrentChatId(-1L);
+        MessageManager.getInstance().clearMessages();
+        editingMessage = null;
+        if (input != null) {
+            input.setText("");
+        }
+        inputImages.clear();
+        pendingAttachmentNames.clear();
+        updateAttachmentPreview();
+        updateComposerState();
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+        updateEmptyState();
+        config.setActiveChatId(-1L);
+    }
+
+    private void refreshChatList() {
+        String query = chatSearch != null && chatSearch.getText() != null ? chatSearch.getText().toString() : null;
+        chatListItems.clear();
+        chatListItems.addAll(chatRepository.getChats(query));
+        ListAdapter adapter = chatsList.getAdapter();
+        if (adapter instanceof BaseAdapter) {
+            ((BaseAdapter) adapter).notifyDataSetChanged();
+        }
+    }
+
+    private void startNewDraftChat(boolean openPager) {
+        stopSpeakingMessage(null);
+        if (editingMessage != null) {
+            cancelEditMode();
+        } else {
+            input.setText("");
+            inputImages.clear();
+            pendingAttachmentNames.clear();
+            updateAttachmentPreview();
+            updateComposerState();
+        }
+        clearCurrentChat();
+        if (openPager) {
+            mainPager.setCurrentItem(1, true);
+        }
+    }
+
+    private void openChat(long chatId, boolean openPager) {
+        ChatRecord chat = chatRepository.getChat(chatId);
+        if (chat == null) {
+            clearCurrentChat();
+            refreshChatList();
+            return;
+        }
+        activeChatId = chatId;
+        config.setActiveChatId(chatId);
+        MessageManager.getInstance().setCurrentChatId(chatId);
+        MessageManager.getInstance().setMessages(chatRepository.getMessages(chatId));
+        applyChatDefaults(chat);
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+        updateEmptyState();
+        if (openPager) {
+            mainPager.setCurrentItem(1, true);
+        }
+        msgList.post(new Runnable() {
+            public void run() {
+                if (adapter != null && adapter.getCount() > 0) {
+                    msgList.setSelection(adapter.getCount() - 1);
+                }
+            }
+        });
+    }
+
+    private void applyChatDefaults(ChatRecord chat) {
+        if (chat == null) {
+            return;
+        }
+        String modelName = chat.getModelName();
+        if (modelName != null && modelName.length() != 0) {
+            config.updateChatModel(modelName);
+        }
+        thinkingEnabled = chat.isReasoningEnabledDefault();
+        applyVisibleModelsToSelector();
+    }
+
+    private void syncActiveChatDefaults() {
+        if (activeChatId > 0L) {
+            chatRepository.updateChatDefaults(activeChatId, config.getConfig().getChatModel(), thinkingEnabled);
+            refreshChatList();
+        }
+    }
+
+    private void showChatContextMenu(View anchor, final ChatRecord record) {
+        final ArrayList<String> actions = new ArrayList<String>();
+        actions.add(getString(R.string.rename_chat_action));
+        actions.add(getString(R.string.delete_chat_action));
+
+        final ListPopupWindow popupWindow = new ListPopupWindow(this);
+        popupWindow.setAnchorView(anchor);
+        popupWindow.setAdapter(new ArrayAdapter<String>(this, R.layout.popup_action_item, actions));
+        popupWindow.setModal(true);
+        popupWindow.setBackgroundDrawable(getResources().getDrawable(R.drawable.bg_spinner_dropdown));
+        popupWindow.setContentWidth(dpToPx(220));
+        popupWindow.setDropDownGravity(Gravity.RIGHT);
+        popupWindow.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                popupWindow.dismiss();
+                if (position == 0) {
+                    promptRenameChat(record);
+                } else if (position == 1) {
+                    confirmDeleteChat(record);
+                }
+            }
+        });
+        popupWindow.show();
+        ListView listView = popupWindow.getListView();
+        if (listView != null) {
+            listView.setDivider(null);
+            listView.setDividerHeight(0);
+        }
+    }
+
+    private void promptRenameChat(final ChatRecord record) {
+        final EditText editText = new EditText(this);
+        editText.setText(record.getTitle() != null ? record.getTitle() : "");
+        editText.setSelection(editText.getText().length());
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.rename_chat_action)
+                .setView(editText)
+                .setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        String title = editText.getText().toString().trim();
+                        if (title.length() == 0) {
+                            return;
+                        }
+                        chatRepository.renameChat(record.getChatId(), title);
+                        refreshChatList();
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void confirmDeleteChat(final ChatRecord record) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.delete_chat_action)
+                .setMessage(R.string.delete_chat_confirm)
+                .setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface dialog, int which) {
+                        deleteChatRecord(record);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void deleteChatRecord(ChatRecord record) {
+        long chatId = record.getChatId();
+        boolean deletingActive = chatId == activeChatId;
+        chatRepository.deleteChat(chatId);
+        if (deletingActive) {
+            clearCurrentChat();
+            mainPager.setCurrentItem(1, true);
+            refreshChatList();
+        } else {
+            refreshChatList();
+        }
     }
 
     private void showComposeActionsMenu() {
@@ -362,6 +577,7 @@ public class MainActivity extends AppCompatActivity {
                 } else if (action.id == R.id.action_toggle_thinking) {
                     thinkingEnabled = !thinkingEnabled;
                     action.checked = thinkingEnabled;
+                    syncActiveChatDefaults();
                 }
             }
         });
@@ -558,6 +774,9 @@ public class MainActivity extends AppCompatActivity {
             boolean hasReasoning = thinkBuffer.length() != 0;
             if (!hasPartialText && !hasReasoning) {
                 msgs.remove(activeAssistantMessage);
+                chatRepository.deleteMessage(activeAssistantMessage.getMessageId());
+            } else {
+                chatRepository.updateAssistantMessage(activeAssistantMessage);
             }
         }
         resetUIState();
@@ -579,10 +798,13 @@ public class MainActivity extends AppCompatActivity {
         isCancelled = false;
         currentStream = null;
         ArrayList<String> imagesToSend = new ArrayList<String>(inputImages);
+        ArrayList<String> attachmentNames = new ArrayList<String>(pendingAttachmentNames);
         if (editingMessage != null) {
             trimMessagesForEdit(editingMessage);
         }
-        MessageManager.getInstance().addMessage(new Message(Role.USER, text, imagesToSend, null));
+        ensureActiveChatForSend();
+        Message userMessage = chatRepository.addUserMessage(activeChatId, text, imagesToSend, attachmentNames, config.getConfig().getChatModel(), thinkingEnabled);
+        MessageManager.getInstance().addMessage(userMessage);
         input.setText("");
         sendBtn.setImageResource(R.drawable.ic_stop_generation);
         input.setEnabled(false);
@@ -594,13 +816,27 @@ public class MainActivity extends AppCompatActivity {
         updateAttachmentPreview();
         adapter.notifyDataSetChanged();
         updateEmptyState();
+        refreshChatList();
         requestAssistantResponse(this.thinkingEnabled, true);
+    }
+
+    private void ensureActiveChatForSend() {
+        if (activeChatId > 0L) {
+            return;
+        }
+        ChatRecord chat = chatRepository.createChat(config.getConfig().getChatModel(), thinkingEnabled);
+        activeChatId = chat.getChatId();
+        config.setActiveChatId(activeChatId);
+        MessageManager.getInstance().setCurrentChatId(activeChatId);
+        refreshChatList();
     }
 
     private void startResponseStream(final InputStream stream, String model, final boolean thinkingEnabled, Message message) {
         this.currentStream = stream;
         final Message msg = message != null ? message : new Message(Role.ASSISTANT, "", model);
         msg.setLlm(model);
+        msg.setReasoningUsed(thinkingEnabled);
+        chatRepository.updateAssistantMessage(msg);
         if (message == null) {
             activeAssistantMessage = msg;
             activeReasoningStartTime = thinkingEnabled ? System.currentTimeMillis() : 0L;
@@ -630,13 +866,18 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleStreamError(String errorMsg) {
         List<Message> messages = MessageManager.getInstance().getMessages();
+        String failedModel = activeAssistantMessage != null && activeAssistantMessage.getLlm() != null
+                ? activeAssistantMessage.getLlm()
+                : config.getConfig().getChatModel();
         if (activeAssistantMessage != null) {
             messages.remove(activeAssistantMessage);
+            chatRepository.deleteMessage(activeAssistantMessage.getMessageId());
         }
-        Message error = new Message(Role.ASSISTANT, errorMsg, getString(R.string.error));
+        Message error = chatRepository.addAssistantMessage(activeChatId, errorMsg, failedModel, false);
         error.setAsError();
         MessageManager.getInstance().addMessage(error);
         updateEmptyState();
+        refreshChatList();
         resetUIState();
     }
 
@@ -668,7 +909,7 @@ public class MainActivity extends AppCompatActivity {
         modelSelector.setEnabled(false);
         updateComposerState();
 
-        final Message pendingAssistant = new Message(Role.ASSISTANT, "", config.getConfig().getChatModel());
+        final Message pendingAssistant = chatRepository.addAssistantPlaceholder(activeChatId, config.getConfig().getChatModel(), thinkingEnabled);
         activeAssistantMessage = pendingAssistant;
         activeReasoningStartTime = thinkingEnabled ? System.currentTimeMillis() : 0L;
         MessageManager.getInstance().addMessage(pendingAssistant);
@@ -770,10 +1011,15 @@ public class MainActivity extends AppCompatActivity {
         inputImages.clear();
         pendingAttachmentNames.clear();
         List<String> images = message.getInputImages();
+        List<ChatAttachment> attachments = message.getAttachments();
         if (images != null) {
             for (int i = 0; i < images.size(); i++) {
                 inputImages.add(images.get(i));
-                pendingAttachmentNames.add(getString(R.string.attachment_name_fallback, Integer.valueOf(i + 1)));
+                if (attachments != null && i < attachments.size() && attachments.get(i) != null && attachments.get(i).getName() != null) {
+                    pendingAttachmentNames.add(attachments.get(i).getName());
+                } else {
+                    pendingAttachmentNames.add(getString(R.string.attachment_name_fallback, Integer.valueOf(i + 1)));
+                }
             }
         }
         updateAttachmentPreview();
@@ -797,9 +1043,11 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         stopSpeakingMessage(null);
+        chatRepository.deleteMessagesFrom(activeChatId, targetMessage.getMessageId());
         while (messages.size() > targetIndex) {
             messages.remove(targetIndex);
         }
+        refreshChatList();
     }
 
     private void updateEditModeUi() {
@@ -827,8 +1075,10 @@ public class MainActivity extends AppCompatActivity {
         }
         stopSpeakingMessage(message);
         messages.remove(messageIndex);
+        chatRepository.deleteMessage(message.getMessageId());
         adapter.notifyDataSetChanged();
         updateEmptyState();
+        refreshChatList();
         requestAssistantResponse(thinkingEnabled, false);
     }
 
@@ -1052,6 +1302,7 @@ public class MainActivity extends AppCompatActivity {
         String displayContent = contentBuffer.toString();
         String displayThink = thinkBuffer.toString();
         msg.setContent(displayContent);
+        msg.setReasoningUsed(thinkingEnabled);
         if (thinkingEnabled) {
             adapter.setResponseLoaderVisible(msg, false);
             adapter.updateReasoningState(msg, displayThink, true, !isFinal, getReasoningDurationSeconds());
@@ -1067,6 +1318,8 @@ public class MainActivity extends AppCompatActivity {
             adapter.updateReasoningState(msg, "", false, false, 0);
             adapter.setResponseComplete(msg, isFinal);
         }
+        chatRepository.updateAssistantMessage(msg);
+        refreshChatList();
         adapter.notifyDataSetChanged();
     }
 
@@ -1120,6 +1373,26 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private String formatChatUpdatedAt(long updatedAt) {
+        if (updatedAt <= 0L) {
+            return "";
+        }
+        long diff = System.currentTimeMillis() - updatedAt;
+        if (diff < 60000L) {
+            return getString(R.string.time_just_now);
+        }
+        if (diff < 3600000L) {
+            return getString(R.string.time_minutes_ago, Integer.valueOf((int) (diff / 60000L)));
+        }
+        if (diff < 86400000L) {
+            return getString(R.string.time_hours_ago, Integer.valueOf((int) (diff / 3600000L)));
+        }
+        if (diff < 172800000L) {
+            return getString(R.string.time_yesterday);
+        }
+        return DateFormat.getDateFormat(this).format(new Date(updatedAt));
+    }
+
     private class MainPagerAdapter extends PagerAdapter {
         public int getCount() {
             return 2;
@@ -1143,16 +1416,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private static class ChatListItem {
-        final String title;
-        final String subtitle;
-
-        ChatListItem(String title, String subtitle) {
-            this.title = title;
-            this.subtitle = subtitle;
-        }
-    }
-
     private class ChatListAdapter extends BaseAdapter {
         public int getCount() {
             return chatListItems.size();
@@ -1163,7 +1426,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         public long getItemId(int position) {
-            return position;
+            return chatListItems.get(position).getChatId();
         }
 
         public View getView(int position, View convertView, ViewGroup parent) {
@@ -1173,9 +1436,18 @@ public class MainActivity extends AppCompatActivity {
             }
             TextView title = (TextView) view.findViewById(R.id.chat_item_title);
             TextView subtitle = (TextView) view.findViewById(R.id.chat_item_subtitle);
-            ChatListItem item = chatListItems.get(position);
-            title.setText(item.title);
-            subtitle.setText(item.subtitle);
+            TextView meta = (TextView) view.findViewById(R.id.chat_item_meta);
+            ChatRecord item = chatListItems.get(position);
+            String titleText = item.getTitle();
+            if (titleText == null || titleText.trim().length() == 0) {
+                titleText = getString(R.string.untitled_chat);
+            }
+            title.setText(titleText);
+            String preview = item.getLastMessagePreview();
+            subtitle.setText(preview != null && preview.length() != 0 ? preview : getString(R.string.empty_chat_hint));
+            if (meta != null) {
+                meta.setText(formatChatUpdatedAt(item.getUpdatedAt()));
+            }
             return view;
         }
     }

@@ -197,8 +197,9 @@ class MarkdownFormatter {
                     continue;
                 }
             }
-            builder.append(ch);
-            i++;
+            int codePoint = text.codePointAt(i);
+            builder.append(new String(Character.toChars(codePoint)));
+            i += Character.charCount(codePoint);
         }
     }
 

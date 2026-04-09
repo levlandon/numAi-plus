@@ -11,6 +11,7 @@ import java.util.List;
 class MessageManager {
     private static MessageManager instance;
     private List<Message> messages;
+    private long currentChatId = -1L;
 
     private MessageManager() {
         messages = new ArrayList<>();
@@ -31,7 +32,22 @@ class MessageManager {
         return messages;
     }
 
+    void setMessages(List<Message> messages) {
+        this.messages.clear();
+        if (messages != null) {
+            this.messages.addAll(messages);
+        }
+    }
+
     void clearMessages() {
         messages.clear();
+    }
+
+    long getCurrentChatId() {
+        return currentChatId;
+    }
+
+    void setCurrentChatId(long currentChatId) {
+        this.currentChatId = currentChatId;
     }
 }

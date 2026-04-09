@@ -19,4 +19,17 @@ enum Role {
     public String toString() {
         return value;
     }
+
+    static Role fromValue(String value) {
+        if (value == null) {
+            return USER;
+        }
+        for (int i = 0; i < values().length; i++) {
+            Role role = values()[i];
+            if (role.value.equals(value)) {
+                return role;
+            }
+        }
+        return USER;
+    }
 }

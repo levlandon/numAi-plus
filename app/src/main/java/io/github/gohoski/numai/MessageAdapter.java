@@ -20,6 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,9 +105,22 @@ class MessageAdapter extends ArrayAdapter<Message> {
         AssistantUiState state = assistantUiStates.get(message);
         if (state == null) {
             state = new AssistantUiState();
+            hydrateAssistantUiState(state, message);
             assistantUiStates.put(message, state);
         }
         return state;
+    }
+
+    private void hydrateAssistantUiState(AssistantUiState state, Message message) {
+        if (state == null || message == null || message.isSent()) {
+            return;
+        }
+        String content = message.getContent();
+        boolean hasContent = content != null && content.trim().length() != 0;
+        state.reasoningEnabled = message.isReasoningUsed();
+        state.reasoningActive = false;
+        state.showResponseLoader = false;
+        state.responseComplete = hasContent || message.getMessageId() > 0L;
     }
 
     @Override
@@ -162,8 +176,11 @@ class MessageAdapter extends ArrayAdapter<Message> {
 
     private void bindSentImages(SentViewHolder holder, Message message) {
         holder.imageContainer.removeAllViews();
+        List<ChatAttachment> attachments = message.getAttachments();
         List<String> images = message.getInputImages();
-        if (images == null || images.isEmpty()) {
+        boolean hasAttachments = attachments != null && !attachments.isEmpty();
+        boolean hasImages = images != null && !images.isEmpty();
+        if (!hasAttachments && !hasImages) {
             holder.imageContainer.setVisibility(View.GONE);
             return;
         }
@@ -171,8 +188,11 @@ class MessageAdapter extends ArrayAdapter<Message> {
         holder.imageContainer.setVisibility(View.VISIBLE);
         LayoutInflater inflater = LayoutInflater.from(context);
         LinearLayout row = null;
-        for (int i = 0; i < images.size(); i++) {
-            Bitmap bitmap = decodeMessageBitmap(images.get(i));
+        int count = hasAttachments ? attachments.size() : images.size();
+        for (int i = 0; i < count; i++) {
+            final ChatAttachment attachment = hasAttachments ? attachments.get(i) : null;
+            final String previewSource = attachment != null ? attachment.getPreviewSource() : images.get(i);
+            Bitmap bitmap = decodeMessageBitmap(previewSource);
             if (bitmap == null) continue;
 
             if (row == null || row.getChildCount() == 3) {
@@ -187,10 +207,9 @@ class MessageAdapter extends ArrayAdapter<Message> {
             View thumbView = inflater.inflate(R.layout.message_image_thumbnail, row, false);
             ImageView preview = (ImageView) thumbView.findViewById(R.id.thumbnail_image);
             preview.setImageBitmap(bitmap);
-            final String rawImage = images.get(i);
             thumbView.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    showImagePreview(rawImage);
+                    showImagePreview(attachment != null ? attachment.getPreviewSource() : previewSource);
                 }
             });
             row.addView(thumbView);
@@ -384,6 +403,11 @@ class MessageAdapter extends ArrayAdapter<Message> {
     private Bitmap decodeMessageBitmap(String rawImage) {
         if (rawImage == null || rawImage.length() == 0) {
             return null;
+        }
+
+        File file = new File(rawImage);
+        if (file.exists()) {
+            return BitmapFactory.decodeFile(file.getAbsolutePath());
         }
 
         String encodedImage = rawImage;

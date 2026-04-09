@@ -28,4 +28,13 @@
         android:layout_marginTop="4dp"
         android:ellipsize="end"
         android:maxLines="1" />
+
+    <TextView
+        android:id="@+id/chat_item_meta"
+        style="@style/AppMetaText"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:gravity="right"
+        android:maxLines="1" />
 </LinearLayout>

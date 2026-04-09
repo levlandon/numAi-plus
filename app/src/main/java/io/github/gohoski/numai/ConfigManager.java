@@ -20,7 +20,8 @@ class ConfigManager {
         KEY_SHOW_ALL_MODELS = "showAllModels",
         KEY_SELECTED_MODELS = "selectedModels",
         KEY_CACHED_MODELS = "cachedModels",
-        KEY_CACHED_MODELS_URL = "cachedModelsUrl";
+        KEY_CACHED_MODELS_URL = "cachedModelsUrl",
+        KEY_ACTIVE_CHAT_ID = "activeChatId";
 
     private static ConfigManager instance;
     private final SharedPreferences preferences;
@@ -130,6 +131,14 @@ class ConfigManager {
         editor.putString(KEY_CACHED_MODELS_URL, config.getBaseUrl());
         editor.putString(KEY_CACHED_MODELS, joinModels(models));
         editor.commit();
+    }
+
+    long getActiveChatId() {
+        return preferences.getLong(KEY_ACTIVE_CHAT_ID, -1L);
+    }
+
+    void setActiveChatId(long chatId) {
+        preferences.edit().putLong(KEY_ACTIVE_CHAT_ID, chatId).commit();
     }
 
     private java.util.ArrayList<String> parseStoredModels(String raw) {
