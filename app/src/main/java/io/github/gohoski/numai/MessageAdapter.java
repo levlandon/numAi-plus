@@ -32,6 +32,7 @@ import java.util.Map;
 class MessageAdapter extends ArrayAdapter<Message> {
     private static final int VIEW_TYPE_SENT = 0;
     private static final int VIEW_TYPE_RECEIVED = 1;
+    private static final int VIEW_TYPE_ERROR = 2;
 
     private final Context context;
     private final Map<Message, AssistantUiState> assistantUiStates = new HashMap<Message, AssistantUiState>();
@@ -44,6 +45,7 @@ class MessageAdapter extends ArrayAdapter<Message> {
         void onToggleSpeak(Message message);
         void onSelectText(Message message);
         void onShowUserMessageMenu(View anchor, Message message);
+        void onRetryError(Message message);
     }
 
     MessageAdapter(Context context, List<Message> messages, MessageActionListener actionListener) {
@@ -55,12 +57,16 @@ class MessageAdapter extends ArrayAdapter<Message> {
 
     @Override
     public int getItemViewType(int position) {
-        return getItem(position).isSent() ? VIEW_TYPE_SENT : VIEW_TYPE_RECEIVED;
+        Message message = getItem(position);
+        if (message.isError()) {
+            return VIEW_TYPE_ERROR;
+        }
+        return message.isSent() ? VIEW_TYPE_SENT : VIEW_TYPE_RECEIVED;
     }
 
     @Override
     public int getViewTypeCount() {
-        return 2;
+        return 3;
     }
 
     void prepareAssistantMessage(Message message, boolean reasoningEnabled) {
@@ -131,7 +137,51 @@ class MessageAdapter extends ArrayAdapter<Message> {
         if (viewType == VIEW_TYPE_SENT) {
             return getSentView(convertView, parent, message);
         }
+        if (viewType == VIEW_TYPE_ERROR) {
+            return getErrorView(convertView, parent, message);
+        }
         return getReceivedView(position, convertView, parent, message);
+    }
+
+    private View getErrorView(View convertView, ViewGroup parent, final Message message) {
+        ErrorViewHolder holder;
+        if (convertView == null) {
+            convertView = LayoutInflater.from(getContext()).inflate(R.layout.message_error, parent, false);
+            holder = new ErrorViewHolder();
+            holder.title = (TextView) convertView.findViewById(R.id.error_title);
+            holder.message = (TextView) convertView.findViewById(R.id.error_message);
+            holder.details = (TextView) convertView.findViewById(R.id.error_details);
+            holder.retry = convertView.findViewById(R.id.error_retry);
+            holder.detailsToggle = convertView.findViewById(R.id.error_details_toggle);
+            convertView.setTag(holder);
+        } else {
+            holder = (ErrorViewHolder) convertView.getTag();
+        }
+
+        final AssistantUiState state = getAssistantUiState(message);
+        holder.title.setText(message.getErrorTitle() != null && message.getErrorTitle().length() != 0
+                ? message.getErrorTitle()
+                : context.getString(R.string.error_generic_title));
+        holder.message.setText(message.getContent() != null ? message.getContent() : "");
+        boolean hasDetails = message.getErrorDetails() != null && message.getErrorDetails().length() != 0;
+        holder.detailsToggle.setVisibility(hasDetails ? View.VISIBLE : View.GONE);
+        holder.details.setVisibility(hasDetails && state.errorExpanded ? View.VISIBLE : View.GONE);
+        holder.details.setText(message.getErrorDetails() != null ? message.getErrorDetails() : "");
+        holder.detailsToggle.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                AssistantUiState currentState = getAssistantUiState(message);
+                currentState.errorExpanded = !currentState.errorExpanded;
+                notifyDataSetChanged();
+            }
+        });
+        holder.retry.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                if (actionListener != null) {
+                    actionListener.onRetryError(message);
+                }
+            }
+        });
+        return convertView;
     }
 
     private View getSentView(View convertView, ViewGroup parent, Message message) {
@@ -485,6 +535,7 @@ class MessageAdapter extends ArrayAdapter<Message> {
         boolean reasoningExpanded;
         boolean showResponseLoader;
         boolean responseComplete;
+        boolean errorExpanded;
         int reasoningDurationSec;
         String reasoningText = "";
         String renderedContentSource;
@@ -514,5 +565,13 @@ class MessageAdapter extends ArrayAdapter<Message> {
         ImageButton regenerateButton;
         ImageButton speakButton;
         ImageButton selectButton;
+    }
+
+    private static class ErrorViewHolder {
+        TextView title;
+        TextView message;
+        TextView details;
+        View retry;
+        View detailsToggle;
     }
 }

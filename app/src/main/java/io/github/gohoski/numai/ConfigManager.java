@@ -21,7 +21,16 @@ class ConfigManager {
         KEY_SELECTED_MODELS = "selectedModels",
         KEY_CACHED_MODELS = "cachedModels",
         KEY_CACHED_MODELS_URL = "cachedModelsUrl",
-        KEY_ACTIVE_CHAT_ID = "activeChatId";
+        KEY_ACTIVE_CHAT_ID = "activeChatId",
+        KEY_NICKNAME = "nickname",
+        KEY_AVATAR_PATH = "avatarPath",
+        KEY_USER_NAME = "user_name",
+        KEY_USER_ROLE = "user_role",
+        KEY_USAGE_GOAL = "usage_goal",
+        KEY_RESPONSE_STYLE = "response_style",
+        KEY_RESPONSE_DETAIL_LEVEL = "response_detail_level",
+        KEY_RESPONSE_EMOTIONALITY = "response_emotionality",
+        KEY_CUSTOM_SYSTEM_PROMPT = "custom_system_prompt";
 
     private static ConfigManager instance;
     private final SharedPreferences preferences;
@@ -139,6 +148,78 @@ class ConfigManager {
 
     void setActiveChatId(long chatId) {
         preferences.edit().putLong(KEY_ACTIVE_CHAT_ID, chatId).commit();
+    }
+
+    String getNickname() {
+        return preferences.getString(KEY_NICKNAME, "");
+    }
+
+    void setNickname(String nickname) {
+        preferences.edit().putString(KEY_NICKNAME, nickname != null ? nickname : "").commit();
+    }
+
+    String getAvatarPath() {
+        return preferences.getString(KEY_AVATAR_PATH, "");
+    }
+
+    void setAvatarPath(String avatarPath) {
+        preferences.edit().putString(KEY_AVATAR_PATH, avatarPath != null ? avatarPath : "").commit();
+    }
+
+    String getUserName() {
+        return preferences.getString(KEY_USER_NAME, "");
+    }
+
+    void setUserName(String value) {
+        preferences.edit().putString(KEY_USER_NAME, value != null ? value : "").commit();
+    }
+
+    String getUserRole() {
+        return preferences.getString(KEY_USER_ROLE, "");
+    }
+
+    void setUserRole(String value) {
+        preferences.edit().putString(KEY_USER_ROLE, value != null ? value : "").commit();
+    }
+
+    String getUsageGoal() {
+        return preferences.getString(KEY_USAGE_GOAL, "");
+    }
+
+    void setUsageGoal(String value) {
+        preferences.edit().putString(KEY_USAGE_GOAL, value != null ? value : "").commit();
+    }
+
+    String getResponseStyle() {
+        return preferences.getString(KEY_RESPONSE_STYLE, "");
+    }
+
+    void setResponseStyle(String value) {
+        preferences.edit().putString(KEY_RESPONSE_STYLE, value != null ? value : "").commit();
+    }
+
+    String getResponseDetailLevel() {
+        return preferences.getString(KEY_RESPONSE_DETAIL_LEVEL, "");
+    }
+
+    void setResponseDetailLevel(String value) {
+        preferences.edit().putString(KEY_RESPONSE_DETAIL_LEVEL, value != null ? value : "").commit();
+    }
+
+    String getResponseEmotionality() {
+        return preferences.getString(KEY_RESPONSE_EMOTIONALITY, "");
+    }
+
+    void setResponseEmotionality(String value) {
+        preferences.edit().putString(KEY_RESPONSE_EMOTIONALITY, value != null ? value : "").commit();
+    }
+
+    String getCustomSystemPrompt() {
+        return preferences.getString(KEY_CUSTOM_SYSTEM_PROMPT, "");
+    }
+
+    void setCustomSystemPrompt(String value) {
+        preferences.edit().putString(KEY_CUSTOM_SYSTEM_PROMPT, value != null ? value : "").commit();
     }
 
     private java.util.ArrayList<String> parseStoredModels(String raw) {

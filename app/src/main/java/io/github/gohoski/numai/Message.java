@@ -17,6 +17,8 @@ class Message {
     private List<ChatAttachment> attachments;
     private boolean isError = false;
     private boolean reasoningUsed = false;
+    private String errorTitle;
+    private String errorDetails;
 
     Message(Role role, String content) {
         this.role = role;
@@ -126,5 +128,25 @@ class Message {
 
     void setAsError() {
         isError=true;
+    }
+
+    boolean isError() {
+        return isError;
+    }
+
+    String getErrorTitle() {
+        return errorTitle;
+    }
+
+    void setErrorTitle(String errorTitle) {
+        this.errorTitle = errorTitle;
+    }
+
+    String getErrorDetails() {
+        return errorDetails;
+    }
+
+    void setErrorDetails(String errorDetails) {
+        this.errorDetails = errorDetails;
     }
 }

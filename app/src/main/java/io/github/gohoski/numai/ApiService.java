@@ -36,7 +36,7 @@ class ApiService {
                 try {
                     ApiRequest request = new ApiRequest("/chat/completions?include_think=true", "POST");
                     JSONArray messages = new JSONArray();
-                    String systemStr = config.getConfig().getSystemPrompt();
+                    String systemStr = SystemPromptBuilder.build(config);
                     if (systemStr.length() != 0) {
                         JSONObject system = new JSONObject();
                         system.put("role", "system");

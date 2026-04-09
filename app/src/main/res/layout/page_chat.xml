@@ -17,7 +17,7 @@
         android:id="@+id/messages_list"
         android:layout_width="fill_parent"
         android:layout_height="fill_parent"
-        android:layout_below="@id/toolbar"
+        android:layout_below="@id/config_banner"
         android:layout_above="@id/input_layout"
         android:cacheColorHint="@color/background"
         android:clipToPadding="false"
@@ -34,7 +34,7 @@
         android:id="@+id/empty_state"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_below="@id/toolbar"
+        android:layout_below="@id/config_banner"
         android:layout_above="@id/input_layout"
         android:layout_centerHorizontal="true"
         android:layout_centerVertical="true"
@@ -43,6 +43,42 @@
         android:textColor="@color/textSecondary"
         android:textSize="24sp"
         android:textStyle="bold" />
+
+    <LinearLayout
+        android:id="@+id/config_banner"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/toolbar"
+        android:layout_marginLeft="10dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginRight="10dp"
+        android:background="@drawable/bg_config_banner"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingLeft="14dp"
+        android:paddingTop="12dp"
+        android:paddingRight="14dp"
+        android:paddingBottom="12dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/config_banner_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textColor="@color/textPrimary"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/config_banner_action"
+            style="@style/AppSecondaryButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginLeft="12dp"
+            android:minHeight="36dp"
+            android:text="@string/open_settings" />
+    </LinearLayout>
 
     <include
         layout="@layout/message_input_panel"

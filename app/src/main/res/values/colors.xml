@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="colorPrimary">#2458D3</color>
-    <color name="colorPrimaryDark">#173C91</color>
-    <color name="colorAccent">#FF7A3D</color>
-    <color name="background">#EEF3F9</color>
+    <color name="colorPrimary">#111111</color>
+    <color name="colorPrimaryDark">#000000</color>
+    <color name="colorAccent">#111111</color>
+    <color name="background">#F5F5F5</color>
     <color name="surface">#FFFFFFFF</color>
-    <color name="surfaceAlt">#F6F8FC</color>
-    <color name="surfaceBorder">#D5DFED</color>
-    <color name="textPrimary">#1F2737</color>
-    <color name="textSecondary">#64748A</color>
+    <color name="surfaceAlt">#FAFAFA</color>
+    <color name="surfaceBorder">#D8D8D8</color>
+    <color name="textPrimary">#111111</color>
+    <color name="textSecondary">#6F6F6F</color>
     <color name="messageUser">#F5F7FA</color>
     <color name="messageAssistant">#FFFFFFFF</color>
-    <color name="messageThinking">#E9F0FB</color>
-    <color name="messageUserText">#1F2737</color>
-    <color name="badgeBackground">#FF7A3D</color>
+    <color name="messageThinking">#F1F1F1</color>
+    <color name="messageUserText">#111111</color>
+    <color name="badgeBackground">#111111</color>
 </resources>

@@ -87,6 +87,9 @@ public class MainActivity extends AppCompatActivity {
     private ImageButton sendBtn;
     private Spinner modelSelector;
     private TextView emptyState;
+    private View configBanner;
+    private View configBannerAction;
+    private TextView configBannerText;
     private ImageButton attachBtn;
     private View attachmentPreviewStrip;
     private LinearLayout attachmentPreviewContainer;
@@ -112,6 +115,7 @@ public class MainActivity extends AppCompatActivity {
     private final ArrayList<ChatRecord> chatListItems = new ArrayList<ChatRecord>();
     private final Handler uiHandler = new Handler();
     private Message activeAssistantMessage;
+    private Message lastErrorMessage;
     private long activeReasoningStartTime;
     private Runnable reasoningTicker;
     private Runnable responseLoaderTicker;
@@ -121,6 +125,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean ttsInitializing = false;
     private Message speakingMessage;
     private Message editingMessage;
+    private boolean lastRequestedThinkingEnabled;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -143,11 +148,6 @@ public class MainActivity extends AppCompatActivity {
 
         config = ConfigManager.getInstance(this);
         chatRepository = ChatRepository.getInstance(this);
-        if (config.getConfig().getApiKey().length() == 0) {
-            startActivity(new Intent(this, FirstTimeActivity.class));
-            finish();
-            return;
-        }
         UPDATE_DELAY_MS = config.getConfig().getUpdateDelay();
 
         apiService = new ApiService(this);
@@ -159,6 +159,9 @@ public class MainActivity extends AppCompatActivity {
         attachBtn = (ImageButton) chatPage.findViewById(R.id.attach_button);
         modelSelector = (Spinner) chatPage.findViewById(R.id.model_selector);
         emptyState = (TextView) chatPage.findViewById(R.id.empty_state);
+        configBanner = chatPage.findViewById(R.id.config_banner);
+        configBannerAction = chatPage.findViewById(R.id.config_banner_action);
+        configBannerText = (TextView) chatPage.findViewById(R.id.config_banner_text);
         attachmentPreviewStrip = chatPage.findViewById(R.id.attachment_preview_strip);
         attachmentPreviewContainer = (LinearLayout) chatPage.findViewById(R.id.attachment_preview_container);
         restoreCachedChatModels();
@@ -208,11 +211,16 @@ public class MainActivity extends AppCompatActivity {
             public void onShowUserMessageMenu(View anchor, Message message) {
                 showUserMessageMenu(anchor, message);
             }
+
+            public void onRetryError(Message message) {
+                retryErrorMessage(message);
+            }
         });
         msgList.setAdapter(adapter);
         initializeActiveChat();
         updateAttachmentPreview();
         refreshChatList();
+        setupConfigBanner();
         updateComposerState();
         updateEmptyState();
 
@@ -233,6 +241,9 @@ public class MainActivity extends AppCompatActivity {
         restoreCachedChatModels();
         applyVisibleModelsToSelector();
         refreshChatList();
+        updateProfileButtonAvatar();
+        updateConfigBanner();
+        updateComposerState();
     }
 
     private void setupInputField() {
@@ -252,11 +263,14 @@ public class MainActivity extends AppCompatActivity {
     private void updateComposerState() {
         boolean hasInput = input != null && input.getText() != null && input.getText().toString().trim().length() != 0;
         boolean hasImages = !inputImages.isEmpty();
-        boolean canSend = !isGenerating && (hasInput || hasImages);
+        boolean hasValidConfig = hasValidChatConfig();
+        boolean canSend = hasValidConfig && !isGenerating && (hasInput || hasImages);
         if (sendBtn != null) {
             sendBtn.setEnabled(canSend || isGenerating);
+            sendBtn.setAlpha((canSend || isGenerating) ? 1f : 0.72f);
         }
         updateEditModeUi();
+        updateConfigBanner();
     }
 
     private void updateEmptyState() {
@@ -330,6 +344,50 @@ public class MainActivity extends AppCompatActivity {
         composeActions.add(new ComposeAction(R.id.action_toggle_thinking, getString(R.string.thinking_mode), thinkingEnabled));
     }
 
+    private void setupConfigBanner() {
+        if (configBannerAction != null) {
+            configBannerAction.setOnClickListener(new OnClickListener() {
+                public void onClick(View view) {
+                    startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+                }
+            });
+        }
+        updateConfigBanner();
+    }
+
+    private void updateConfigBanner() {
+        if (configBanner == null) {
+            return;
+        }
+        boolean show = !hasValidChatConfig();
+        configBanner.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (configBannerText != null) {
+            configBannerText.setText(buildConfigBannerText());
+        }
+    }
+
+    private boolean hasValidChatConfig() {
+        Config conf = config.getConfig();
+        return conf != null &&
+                conf.getBaseUrl() != null && conf.getBaseUrl().trim().length() != 0 &&
+                conf.getApiKey() != null && conf.getApiKey().trim().length() != 0 &&
+                conf.getChatModel() != null && conf.getChatModel().trim().length() != 0;
+    }
+
+    private String buildConfigBannerText() {
+        Config conf = config.getConfig();
+        if (conf.getApiKey() == null || conf.getApiKey().trim().length() == 0) {
+            return getString(R.string.config_missing_api_key);
+        }
+        if (conf.getBaseUrl() == null || conf.getBaseUrl().trim().length() == 0) {
+            return getString(R.string.config_missing_provider);
+        }
+        if (conf.getChatModel() == null || conf.getChatModel().trim().length() == 0) {
+            return getString(R.string.config_missing_model);
+        }
+        return getString(R.string.config_missing_provider);
+    }
+
     private void setupChatsPage() {
         chatsList.setAdapter(new ChatListAdapter());
         chatsList.setOnItemClickListener(new AdapterView.OnItemClickListener() {
@@ -365,6 +423,7 @@ public class MainActivity extends AppCompatActivity {
                 startActivity(new Intent(MainActivity.this, SettingsActivity.class));
             }
         });
+        updateProfileButtonAvatar();
 
         View newChatButton = chatsPage.findViewById(R.id.new_chat_button);
         newChatButton.setOnClickListener(new OnClickListener() {
@@ -372,6 +431,28 @@ public class MainActivity extends AppCompatActivity {
                 startNewDraftChat(true);
             }
         });
+    }
+
+    private void updateProfileButtonAvatar() {
+        ImageButton profileButton = (ImageButton) chatsPage.findViewById(R.id.profile_button);
+        if (profileButton == null) {
+            return;
+        }
+        String avatarPath = config.getAvatarPath();
+        if (avatarPath != null && avatarPath.length() != 0) {
+            Bitmap bitmap = BitmapFactory.decodeFile(avatarPath);
+            if (bitmap != null) {
+                Bitmap circularBitmap = AvatarBitmapHelper.createCircularBitmap(bitmap);
+                profileButton.setPadding(0, 0, 0, 0);
+                profileButton.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                profileButton.setImageBitmap(circularBitmap != null ? circularBitmap : bitmap);
+                return;
+            }
+        }
+        int padding = dpToPx(10);
+        profileButton.setPadding(padding, padding, padding, padding);
+        profileButton.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        profileButton.setImageResource(R.drawable.ic_profile);
     }
 
     private void initializeActiveChat() {
@@ -643,7 +724,7 @@ public class MainActivity extends AppCompatActivity {
                 finish();
                 return true;
             case R.id.about:
-                Toast.makeText(this, "numAi " + BuildConfig.VERSION_NAME + " (" + BuildConfig.BUILD_TYPE + ") ▶\ngithub.com/gohoski/numAi", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "NumAI Plus " + BuildConfig.VERSION_NAME + " (" + BuildConfig.BUILD_TYPE + ") ▶\ngithub.com/gohoski/numAi", Toast.LENGTH_SHORT).show();
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
@@ -873,9 +954,13 @@ public class MainActivity extends AppCompatActivity {
             messages.remove(activeAssistantMessage);
             chatRepository.deleteMessage(activeAssistantMessage.getMessageId());
         }
-        Message error = chatRepository.addAssistantMessage(activeChatId, errorMsg, failedModel, false);
+        ErrorDisplayData errorData = classifyError(errorMsg, failedModel);
+        Message error = chatRepository.addAssistantMessage(activeChatId, errorData.summary, failedModel, false);
         error.setAsError();
+        error.setErrorTitle(errorData.title);
+        error.setErrorDetails(errorData.details);
         MessageManager.getInstance().addMessage(error);
+        lastErrorMessage = error;
         updateEmptyState();
         refreshChatList();
         resetUIState();
@@ -900,6 +985,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void requestAssistantResponse(final boolean thinkingEnabled, boolean rollbackUserOnStop) {
+        if (!hasValidChatConfig()) {
+            updateComposerState();
+            return;
+        }
+        lastRequestedThinkingEnabled = thinkingEnabled;
         removeLastUserOnStop = rollbackUserOnStop;
         isGenerating = true;
         sendBtn.setImageResource(R.drawable.ic_stop_generation);
@@ -952,6 +1042,24 @@ public class MainActivity extends AppCompatActivity {
         ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         clipboard.setText(message.getContent());
         Toast.makeText(this, R.string.text_copied, Toast.LENGTH_SHORT).show();
+    }
+
+    private void retryErrorMessage(Message message) {
+        if (isGenerating || message == null) {
+            return;
+        }
+        List<Message> messages = MessageManager.getInstance().getMessages();
+        messages.remove(message);
+        if (message.getMessageId() > 0L) {
+            chatRepository.deleteMessage(message.getMessageId());
+        }
+        if (lastErrorMessage == message) {
+            lastErrorMessage = null;
+        }
+        adapter.notifyDataSetChanged();
+        updateEmptyState();
+        refreshChatList();
+        requestAssistantResponse(lastRequestedThinkingEnabled, false);
     }
 
     private void showUserMessageMenu(View anchor, final Message message) {
@@ -1373,6 +1481,56 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private ErrorDisplayData classifyError(String rawError, String modelName) {
+        String normalized = rawError != null ? rawError.toLowerCase(Locale.US) : "";
+        String title = getString(R.string.error_generic_title);
+        String summary = getString(R.string.error_unknown_summary);
+
+        if (normalized.indexOf("invalid api") != -1 || normalized.indexOf("unauthorized") != -1 || normalized.indexOf("401") != -1) {
+            title = getString(R.string.error_invalid_api_key_title);
+            summary = getString(R.string.error_invalid_api_key_summary);
+        } else if (normalized.indexOf("model") != -1 && normalized.indexOf("not found") != -1) {
+            title = getString(R.string.error_model_not_found_title);
+            summary = getString(R.string.error_model_not_found_summary);
+        } else if (normalized.indexOf("quota") != -1 || normalized.indexOf("credit") != -1 || normalized.indexOf("429") != -1) {
+            title = getString(R.string.error_quota_title);
+            summary = getString(R.string.error_quota_summary);
+        } else if (normalized.indexOf("timed out") != -1 || normalized.indexOf("timeout") != -1) {
+            title = getString(R.string.error_timeout_title);
+            summary = getString(R.string.error_timeout_summary);
+        } else if (normalized.indexOf("network") != -1 || normalized.indexOf("failed to connect") != -1 || normalized.indexOf("unable to resolve host") != -1) {
+            title = getString(R.string.error_network_title);
+            summary = getString(R.string.error_network_summary);
+        }
+
+        String providerName = ApiManager.getNameByUrl(config.getConfig().getBaseUrl());
+        if (providerName == null || providerName.length() == 0) {
+            providerName = config.getConfig().getBaseUrl();
+        }
+
+        StringBuffer details = new StringBuffer();
+        details.append("Raw error: ").append(rawError != null ? rawError : "").append('\n');
+        details.append("HTTP status: ").append(extractHttpStatus(rawError) != null ? extractHttpStatus(rawError) : "n/a").append('\n');
+        details.append("Provider: ").append(providerName != null ? providerName : "").append('\n');
+        details.append("Model: ").append(modelName != null ? modelName : "");
+        return new ErrorDisplayData(title, summary, details.toString());
+    }
+
+    private String extractHttpStatus(String rawError) {
+        if (rawError == null) {
+            return null;
+        }
+        for (int i = 0; i + 2 < rawError.length(); i++) {
+            char a = rawError.charAt(i);
+            char b = rawError.charAt(i + 1);
+            char c = rawError.charAt(i + 2);
+            if (Character.isDigit(a) && Character.isDigit(b) && Character.isDigit(c)) {
+                return rawError.substring(i, i + 3);
+            }
+        }
+        return null;
+    }
+
     private String formatChatUpdatedAt(long updatedAt) {
         if (updatedAt <= 0L) {
             return "";
@@ -1509,6 +1667,18 @@ public class MainActivity extends AppCompatActivity {
             this.id = id;
             this.title = title;
             this.checked = checked;
+        }
+    }
+
+    private static class ErrorDisplayData {
+        final String title;
+        final String summary;
+        final String details;
+
+        ErrorDisplayData(String title, String summary, String details) {
+            this.title = title;
+            this.summary = summary;
+            this.details = details;
         }
     }
 
