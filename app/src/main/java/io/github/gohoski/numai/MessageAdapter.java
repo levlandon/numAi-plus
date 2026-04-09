@@ -4,6 +4,8 @@ import android.content.Context;
 import android.app.Dialog;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.os.Build;
+import android.text.method.LinkMovementMethod;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -32,11 +34,22 @@ class MessageAdapter extends ArrayAdapter<Message> {
 
     private final Context context;
     private final Map<Message, AssistantUiState> assistantUiStates = new HashMap<Message, AssistantUiState>();
+    private final MessageActionListener actionListener;
+    private Message speakingMessage;
 
-    MessageAdapter(Context context, List<Message> messages) {
+    interface MessageActionListener {
+        void onCopyMessage(Message message);
+        void onRegenerateMessage(Message message);
+        void onToggleSpeak(Message message);
+        void onSelectText(Message message);
+        void onShowUserMessageMenu(View anchor, Message message);
+    }
+
+    MessageAdapter(Context context, List<Message> messages, MessageActionListener actionListener) {
         super(context, R.layout.message_sent, messages);
         Log.d("MessageAdapter", "Created adapter with " + messages.size() + " messages");
         this.context = context;
+        this.actionListener = actionListener;
     }
 
     @Override
@@ -56,6 +69,9 @@ class MessageAdapter extends ArrayAdapter<Message> {
         state.reasoningText = "";
         state.reasoningDurationSec = 0;
         state.showResponseLoader = false;
+        state.responseComplete = false;
+        state.renderedContentSource = null;
+        state.renderedContent = null;
     }
 
     void updateReasoningState(Message message, String reasoningText, boolean reasoningEnabled, boolean reasoningActive, int durationSec) {
@@ -72,6 +88,16 @@ class MessageAdapter extends ArrayAdapter<Message> {
     void setResponseLoaderVisible(Message message, boolean visible) {
         AssistantUiState state = getAssistantUiState(message);
         state.showResponseLoader = visible;
+    }
+
+    void setResponseComplete(Message message, boolean complete) {
+        AssistantUiState state = getAssistantUiState(message);
+        state.responseComplete = complete;
+    }
+
+    void setSpeakingMessage(Message message) {
+        speakingMessage = message;
+        notifyDataSetChanged();
     }
 
     private AssistantUiState getAssistantUiState(Message message) {
@@ -95,6 +121,7 @@ class MessageAdapter extends ArrayAdapter<Message> {
     }
 
     private View getSentView(View convertView, ViewGroup parent, Message message) {
+        final Message sentMessage = message;
         SentViewHolder holder;
 
         if (convertView == null) {
@@ -102,6 +129,7 @@ class MessageAdapter extends ArrayAdapter<Message> {
             holder = new SentViewHolder();
             holder.imageContainer = (LinearLayout) convertView.findViewById(R.id.message_images);
             holder.messageText = (TextView) convertView.findViewById(R.id.message_text);
+            holder.userBubble = convertView.findViewById(R.id.user_bubble);
             convertView.setTag(holder);
         } else {
             holder = (SentViewHolder) convertView.getTag();
@@ -118,6 +146,15 @@ class MessageAdapter extends ArrayAdapter<Message> {
         LinearLayout.LayoutParams textParams = (LinearLayout.LayoutParams) holder.messageText.getLayoutParams();
         textParams.topMargin = holder.imageContainer.getVisibility() == View.VISIBLE && hasText ? dpToPx(8) : 0;
         holder.messageText.setLayoutParams(textParams);
+        holder.userBubble.setOnLongClickListener(new View.OnLongClickListener() {
+            public boolean onLongClick(View view) {
+                if (actionListener != null) {
+                    actionListener.onShowUserMessageMenu(view, sentMessage);
+                    return true;
+                }
+                return false;
+            }
+        });
 
         convertView.requestLayout();
         return convertView;
@@ -181,6 +218,11 @@ class MessageAdapter extends ArrayAdapter<Message> {
             holder.thinkingProcess = (TextView) convertView.findViewById(R.id.thinkingProcess);
             holder.responseLoader = convertView.findViewById(R.id.response_loader);
             holder.response = convertView.findViewById(R.id.response);
+            holder.actions = convertView.findViewById(R.id.response_actions);
+            holder.copyButton = (ImageButton) convertView.findViewById(R.id.action_copy);
+            holder.regenerateButton = (ImageButton) convertView.findViewById(R.id.action_regenerate);
+            holder.speakButton = (ImageButton) convertView.findViewById(R.id.action_speak);
+            holder.selectButton = (ImageButton) convertView.findViewById(R.id.action_select_text);
             convertView.setTag(holder);
         } else {
             holder = (ReceivedViewHolder) convertView.getTag();
@@ -190,7 +232,7 @@ class MessageAdapter extends ArrayAdapter<Message> {
         final String displayContent = message.getContent() != null ? message.getContent() : "";
         final String reasoningText = state.reasoningText != null ? state.reasoningText : "";
 
-        holder.messageText.setText(displayContent);
+        bindAssistantText(holder, state, displayContent);
         if (shouldShowModelLabel(position, message)) {
             holder.llm.setText(message.getLlm());
             holder.llm.setVisibility(View.VISIBLE);
@@ -213,9 +255,54 @@ class MessageAdapter extends ArrayAdapter<Message> {
             holder.responseLoader.setVisibility(View.GONE);
             holder.messageText.setVisibility(displayContent.length() == 0 ? View.GONE : View.VISIBLE);
         }
+        bindResponseActions(position, holder, message, state, displayContent, showLoader);
 
         convertView.requestLayout();
         return convertView;
+    }
+
+    private void bindResponseActions(int position, ReceivedViewHolder holder, final Message message, AssistantUiState state, String displayContent, boolean showLoader) {
+        boolean showActions = state.responseComplete && !showLoader && displayContent.length() != 0 && !message.isSent();
+        holder.actions.setVisibility(showActions ? View.VISIBLE : View.GONE);
+        if (!showActions) {
+            return;
+        }
+
+        holder.copyButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                if (actionListener != null) {
+                    actionListener.onCopyMessage(message);
+                }
+            }
+        });
+
+        final boolean canRegenerate = isLatestAssistantMessage(position);
+        holder.regenerateButton.setEnabled(canRegenerate);
+        holder.regenerateButton.setAlpha(canRegenerate ? 1f : 0.35f);
+        holder.regenerateButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                if (actionListener != null && canRegenerate) {
+                    actionListener.onRegenerateMessage(message);
+                }
+            }
+        });
+
+        boolean isSpeaking = message == speakingMessage;
+        holder.speakButton.setImageResource(isSpeaking ? R.drawable.ic_tts_stop : R.drawable.ic_volume_up);
+        holder.speakButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                if (actionListener != null) {
+                    actionListener.onToggleSpeak(message);
+                }
+            }
+        });
+        holder.selectButton.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                if (actionListener != null) {
+                    actionListener.onSelectText(message);
+                }
+            }
+        });
     }
 
     private void bindReasoningSection(final ReceivedViewHolder holder, final AssistantUiState state, final String reasoningText) {
@@ -264,6 +351,31 @@ class MessageAdapter extends ArrayAdapter<Message> {
                 notifyDataSetChanged();
             }
         });
+    }
+
+    private void bindAssistantText(ReceivedViewHolder holder, AssistantUiState state, String displayContent) {
+        if (state.responseComplete) {
+            if (state.renderedContent == null || state.renderedContentSource == null || !state.renderedContentSource.equals(displayContent)) {
+                state.renderedContentSource = displayContent;
+                state.renderedContent = MarkdownFormatter.format(context, displayContent);
+            }
+            holder.messageText.setText(state.renderedContent);
+            applyTextSelection(holder.messageText, true);
+            holder.messageText.setMovementMethod(LinkMovementMethod.getInstance());
+        } else {
+            holder.messageText.setText(displayContent);
+            applyTextSelection(holder.messageText, false);
+            holder.messageText.setMovementMethod(null);
+        }
+    }
+
+    private void applyTextSelection(TextView textView, boolean selectable) {
+        if (Build.VERSION.SDK_INT >= 11) {
+            try {
+                textView.setTextIsSelectable(selectable);
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     private Bitmap decodeMessageBitmap(String rawImage) {
@@ -325,6 +437,16 @@ class MessageAdapter extends ArrayAdapter<Message> {
         return false;
     }
 
+    private boolean isLatestAssistantMessage(int position) {
+        for (int i = getCount() - 1; i >= 0; i--) {
+            Message message = getItem(i);
+            if (message != null && !message.isSent()) {
+                return i == position;
+            }
+        }
+        return false;
+    }
+
     private int dpToPx(int dp) {
         float density = context.getResources().getDisplayMetrics().density;
         return (int) (dp * density + 0.5f);
@@ -335,13 +457,17 @@ class MessageAdapter extends ArrayAdapter<Message> {
         boolean reasoningActive;
         boolean reasoningExpanded;
         boolean showResponseLoader;
+        boolean responseComplete;
         int reasoningDurationSec;
         String reasoningText = "";
+        String renderedContentSource;
+        CharSequence renderedContent;
     }
 
     private static class SentViewHolder {
         LinearLayout imageContainer;
         TextView messageText;
+        View userBubble;
     }
 
     private static class ReceivedViewHolder {
@@ -355,5 +481,10 @@ class MessageAdapter extends ArrayAdapter<Message> {
         TextView thinkingProcess;
         View responseLoader;
         View response;
+        View actions;
+        ImageButton copyButton;
+        ImageButton regenerateButton;
+        ImageButton speakButton;
+        ImageButton selectButton;
     }
 }

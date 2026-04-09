@@ -55,6 +55,9 @@
     <string name="base_url">Enter your API base URL</string>
     <string name="welcome">Welcome to numAi!</string>
     <string name="text_copied">Text copied to clipboard</string>
+    <string name="copy_action">Copy</string>
+    <string name="select_text_action">Select text</string>
+    <string name="tts_not_available">Text-to-speech is unavailable on this device</string>
     <string name="bad_url">Incorrect URL!</string>
     <string name="fail_send">Failed to send message:\n%s</string>
     <string name="fail_send_vision">Failed to send message:\n%s\n\n<b>For images,</b> change the model to Qwen3-VL-235B, GPT-5, or Gemini 3.</string>

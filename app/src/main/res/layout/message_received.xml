@@ -94,7 +94,53 @@
             android:id="@+id/message_text"
             android:layout_width="fill_parent"
             android:layout_height="wrap_content"
+            android:lineSpacingExtra="2dp"
             android:textColor="@color/textPrimary"
             android:textSize="16sp" />
+
+        <LinearLayout
+            android:id="@+id/response_actions"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <android.support.v7.widget.AppCompatImageButton
+                android:id="@+id/action_copy"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:background="@drawable/bg_message_action"
+                android:padding="7dp"
+                android:src="@drawable/ic_copy" />
+
+            <android.support.v7.widget.AppCompatImageButton
+                android:id="@+id/action_regenerate"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginLeft="8dp"
+                android:background="@drawable/bg_message_action"
+                android:padding="7dp"
+                android:src="@drawable/ic_regenerate" />
+
+            <android.support.v7.widget.AppCompatImageButton
+                android:id="@+id/action_speak"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginLeft="8dp"
+                android:background="@drawable/bg_message_action"
+                android:padding="7dp"
+                android:src="@drawable/ic_volume_up" />
+
+            <android.support.v7.widget.AppCompatImageButton
+                android:id="@+id/action_select_text"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginLeft="8dp"
+                android:background="@drawable/bg_message_action"
+                android:padding="7dp"
+                android:src="@drawable/ic_select_text" />
+        </LinearLayout>
     </LinearLayout>
 </RelativeLayout>

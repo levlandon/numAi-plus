@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent"
+    android:background="#F4F7FB"
+    android:padding="16dp">
+
+    <android.support.v7.widget.AppCompatImageButton
+        android:id="@+id/text_preview_back"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_alignParentLeft="true"
+        android:background="@drawable/bg_icon_button"
+        android:padding="10dp"
+        android:src="@drawable/ic_arrow_back_light" />
+
+    <ScrollView
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent"
+        android:layout_below="@id/text_preview_back"
+        android:layout_marginTop="16dp"
+        android:fillViewport="true">
+
+        <TextView
+            android:id="@+id/text_preview_content"
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:lineSpacingExtra="2dp"
+            android:paddingBottom="24dp"
+            android:textColor="@color/textPrimary"
+            android:textIsSelectable="true"
+            android:textSize="16sp" />
+    </ScrollView>
+</RelativeLayout>

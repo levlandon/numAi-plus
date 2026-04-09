@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
+import android.speech.tts.TextToSpeech;
 import android.text.ClipboardManager;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -49,7 +50,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 
 import cc.nnproject.json.JSON;
 import cc.nnproject.json.JSONException;
@@ -105,6 +108,11 @@ public class MainActivity extends AppCompatActivity {
     private long activeReasoningStartTime;
     private Runnable reasoningTicker;
     private Runnable responseLoaderTicker;
+    private boolean removeLastUserOnStop;
+    private TextToSpeech textToSpeech;
+    private boolean ttsReady = false;
+    private boolean ttsInitializing = false;
+    private Message speakingMessage;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -166,7 +174,27 @@ public class MainActivity extends AppCompatActivity {
         });
 
         MessageManager.getInstance().clearMessages();
-        adapter = new MessageAdapter(this, MessageManager.getInstance().getMessages());
+        adapter = new MessageAdapter(this, MessageManager.getInstance().getMessages(), new MessageAdapter.MessageActionListener() {
+            public void onCopyMessage(Message message) {
+                copyAssistantMessage(message);
+            }
+
+            public void onRegenerateMessage(Message message) {
+                regenerateAssistantMessage(message);
+            }
+
+            public void onToggleSpeak(Message message) {
+                toggleSpeakMessage(message);
+            }
+
+            public void onSelectText(Message message) {
+                showSelectableTextDialog(message.getContent());
+            }
+
+            public void onShowUserMessageMenu(View anchor, Message message) {
+                showUserMessageMenu(anchor, message);
+            }
+        });
         msgList.setAdapter(adapter);
         updateAttachmentPreview();
         updateComposerState();
@@ -180,16 +208,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             public void onScroll(android.widget.AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {}
-        });
-        final Context ctx = this;
-        msgList.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
-            @Override
-            public boolean onItemLongClick(AdapterView<?> adapterView, View view, int i, long l) {
-                ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                clipboard.setText(((TextView) view.findViewById(R.id.message_text)).getText());
-                Toast.makeText(ctx, R.string.text_copied, Toast.LENGTH_SHORT).show();
-                return true;
-            }
         });
     }
 
@@ -536,7 +554,7 @@ public class MainActivity extends AppCompatActivity {
             msgs.remove(size - 1);
             size--;
         }
-        if (size > 0 && msgs.get(size - 1).getRole().equals(Role.USER.toString())) {
+        if (removeLastUserOnStop && size > 0 && msgs.get(size - 1).getRole().equals(Role.USER.toString())) {
             msgs.remove(size - 1);
         }
         resetUIState();
@@ -568,47 +586,7 @@ public class MainActivity extends AppCompatActivity {
         updateAttachmentPreview();
         adapter.notifyDataSetChanged();
         updateEmptyState();
-        updateComposerState();
-
-        final boolean thinkingEnabled = this.thinkingEnabled;
-        final Message pendingAssistant = new Message(Role.ASSISTANT, "", config.getConfig().getChatModel());
-        activeAssistantMessage = pendingAssistant;
-        activeReasoningStartTime = thinkingEnabled ? System.currentTimeMillis() : 0L;
-        MessageManager.getInstance().addMessage(pendingAssistant);
-        adapter.prepareAssistantMessage(pendingAssistant, thinkingEnabled);
-        if (thinkingEnabled) {
-            startReasoningTicker(pendingAssistant);
-        } else {
-            scheduleResponseLoaderTicker(pendingAssistant);
-        }
-        adapter.notifyDataSetChanged();
-        updateEmptyState();
-        scrollToBottom();
-
-        thinkBuffer.setLength(0);
-        contentBuffer.setLength(0);
-        isThinkingState = false;
-        isGenerating = true;
-        apiService.chatCompletion(MessageManager.getInstance().getMessages(), thinkingEnabled, new ApiCallback<ApiResult>() {
-            @Override
-            public void onSuccess(final ApiResult apiResult) {
-                if (isCancelled)return;
-                runOnUiThread(new Runnable() {
-                    public void run() {
-                        startResponseStream(apiResult.getResult(), apiResult.getModel(), thinkingEnabled, pendingAssistant);
-                    }
-                });
-            }
-            @Override
-            public void onError(final ApiError error) {
-                if (isCancelled)return;
-                runOnUiThread(new Runnable() {
-                    public void run() {
-                        handleStreamError(error.getMessage());
-                    }
-                });
-            }
-        });
+        requestAssistantResponse(this.thinkingEnabled, true);
     }
 
     private void startResponseStream(final InputStream stream, String model, final boolean thinkingEnabled, Message message) {
@@ -656,6 +634,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void resetUIState() {
         isGenerating = false;
+        removeLastUserOnStop = false;
         stopReasoningTicker();
         cancelResponseLoaderTicker();
         activeAssistantMessage = null;
@@ -669,6 +648,254 @@ public class MainActivity extends AppCompatActivity {
         modelSelector.setEnabled(true);
         updateComposerState();
         updateEmptyState();
+    }
+
+    private void requestAssistantResponse(final boolean thinkingEnabled, boolean rollbackUserOnStop) {
+        removeLastUserOnStop = rollbackUserOnStop;
+        sendBtn.setImageResource(R.drawable.ic_stop_generation);
+        input.setEnabled(false);
+        attachBtn.setEnabled(false);
+        modelSelector.setEnabled(false);
+        updateComposerState();
+
+        final Message pendingAssistant = new Message(Role.ASSISTANT, "", config.getConfig().getChatModel());
+        activeAssistantMessage = pendingAssistant;
+        activeReasoningStartTime = thinkingEnabled ? System.currentTimeMillis() : 0L;
+        MessageManager.getInstance().addMessage(pendingAssistant);
+        adapter.prepareAssistantMessage(pendingAssistant, thinkingEnabled);
+        if (thinkingEnabled) {
+            startReasoningTicker(pendingAssistant);
+        } else {
+            scheduleResponseLoaderTicker(pendingAssistant);
+        }
+        adapter.notifyDataSetChanged();
+        updateEmptyState();
+        scrollToBottom();
+
+        thinkBuffer.setLength(0);
+        contentBuffer.setLength(0);
+        isThinkingState = false;
+        isGenerating = true;
+        apiService.chatCompletion(MessageManager.getInstance().getMessages(), thinkingEnabled, new ApiCallback<ApiResult>() {
+            @Override
+            public void onSuccess(final ApiResult apiResult) {
+                if (isCancelled)return;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        startResponseStream(apiResult.getResult(), apiResult.getModel(), thinkingEnabled, pendingAssistant);
+                    }
+                });
+            }
+            @Override
+            public void onError(final ApiError error) {
+                if (isCancelled)return;
+                runOnUiThread(new Runnable() {
+                    public void run() {
+                        handleStreamError(error.getMessage());
+                    }
+                });
+            }
+        });
+    }
+
+    private void copyAssistantMessage(Message message) {
+        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        clipboard.setText(message.getContent());
+        Toast.makeText(this, R.string.text_copied, Toast.LENGTH_SHORT).show();
+    }
+
+    private void showUserMessageMenu(View anchor, final Message message) {
+        final ArrayList<String> actions = new ArrayList<String>();
+        actions.add(getString(R.string.copy_action));
+        actions.add(getString(R.string.select_text_action));
+
+        final ListPopupWindow popupWindow = new ListPopupWindow(this);
+        popupWindow.setAnchorView(anchor);
+        popupWindow.setAdapter(new ArrayAdapter<String>(this, R.layout.popup_action_item, actions));
+        popupWindow.setModal(true);
+        popupWindow.setBackgroundDrawable(getResources().getDrawable(R.drawable.bg_spinner_dropdown));
+        popupWindow.setContentWidth(dpToPx(220));
+        popupWindow.setDropDownGravity(Gravity.RIGHT);
+        popupWindow.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                popupWindow.dismiss();
+                if (position == 0) {
+                    copyAssistantMessage(message);
+                } else if (position == 1) {
+                    showSelectableTextDialog(message.getContent());
+                }
+            }
+        });
+        popupWindow.show();
+        ListView listView = popupWindow.getListView();
+        if (listView != null) {
+            listView.setDivider(null);
+            listView.setDividerHeight(0);
+        }
+    }
+
+    private void showSelectableTextDialog(String text) {
+        final android.app.Dialog dialog = new android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.setContentView(R.layout.dialog_text_preview);
+        TextView content = (TextView) dialog.findViewById(R.id.text_preview_content);
+        View back = dialog.findViewById(R.id.text_preview_back);
+        content.setText(text != null ? text : "");
+        back.setOnClickListener(new OnClickListener() {
+            public void onClick(View view) {
+                dialog.dismiss();
+            }
+        });
+        dialog.show();
+    }
+
+    private void regenerateAssistantMessage(Message message) {
+        if (isGenerating) {
+            return;
+        }
+        List<Message> messages = MessageManager.getInstance().getMessages();
+        int lastAssistantIndex = findLatestAssistantIndex(messages);
+        int messageIndex = messages.lastIndexOf(message);
+        if (messageIndex == -1 || messageIndex != lastAssistantIndex) {
+            return;
+        }
+        stopSpeakingMessage(message);
+        messages.remove(messageIndex);
+        adapter.notifyDataSetChanged();
+        updateEmptyState();
+        requestAssistantResponse(thinkingEnabled, false);
+    }
+
+    private int findLatestAssistantIndex(List<Message> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            Message message = messages.get(i);
+            if (message != null && !message.isSent()) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void toggleSpeakMessage(Message message) {
+        if (message == speakingMessage) {
+            stopSpeakingMessage(message);
+            return;
+        }
+        if (!ensureTextToSpeechReady(message)) {
+            return;
+        }
+        startSpeakingMessage(message);
+    }
+
+    private boolean ensureTextToSpeechReady(Message pendingMessage) {
+        if (ttsReady && textToSpeech != null) {
+            return true;
+        }
+        if (ttsInitializing) {
+            return false;
+        }
+        ttsInitializing = true;
+        final Message messageToSpeak = pendingMessage;
+        textToSpeech = new TextToSpeech(this, new TextToSpeech.OnInitListener() {
+            public void onInit(int status) {
+                ttsInitializing = false;
+                if (status != TextToSpeech.SUCCESS || textToSpeech == null) {
+                    ttsReady = false;
+                    Toast.makeText(MainActivity.this, R.string.tts_not_available, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                int availability = textToSpeech.setLanguage(Locale.getDefault());
+                if (availability == TextToSpeech.LANG_MISSING_DATA || availability == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    ttsReady = false;
+                    Toast.makeText(MainActivity.this, R.string.tts_not_available, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                textToSpeech.setOnUtteranceCompletedListener(new TextToSpeech.OnUtteranceCompletedListener() {
+                    public void onUtteranceCompleted(String utteranceId) {
+                        runOnUiThread(new Runnable() {
+                            public void run() {
+                                speakingMessage = null;
+                                adapter.setSpeakingMessage(null);
+                            }
+                        });
+                    }
+                });
+                ttsReady = true;
+                startSpeakingMessage(messageToSpeak);
+            }
+        });
+        return false;
+    }
+
+    private void startSpeakingMessage(Message message) {
+        if (message == null || message.getContent() == null || message.getContent().trim().length() == 0) {
+            return;
+        }
+        if (textToSpeech == null || !ttsReady) {
+            return;
+        }
+        String speakableText = stripEmojiForTts(message.getContent()).trim();
+        if (speakableText.length() == 0) {
+            return;
+        }
+        if (speakingMessage != null && speakingMessage != message) {
+            textToSpeech.stop();
+        }
+        speakingMessage = message;
+        adapter.setSpeakingMessage(message);
+        HashMap params = new HashMap();
+        params.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "numai_tts");
+        textToSpeech.speak(speakableText, TextToSpeech.QUEUE_FLUSH, params);
+    }
+
+    private void stopSpeakingMessage(Message message) {
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+        }
+        if (message == null || message == speakingMessage) {
+            speakingMessage = null;
+            adapter.setSpeakingMessage(null);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+            textToSpeech = null;
+        }
+        super.onDestroy();
+    }
+
+    private String stripEmojiForTts(String source) {
+        if (source == null || source.length() == 0) {
+            return "";
+        }
+        StringBuffer buffer = new StringBuffer(source.length());
+        int length = source.length();
+        for (int i = 0; i < length;) {
+            int codePoint = source.codePointAt(i);
+            i += Character.charCount(codePoint);
+            if (isEmojiCodePoint(codePoint)) {
+                continue;
+            }
+            buffer.append(Character.toChars(codePoint));
+        }
+        return buffer.toString();
+    }
+
+    private boolean isEmojiCodePoint(int codePoint) {
+        if (codePoint == 0x200D || (codePoint >= 0xFE00 && codePoint <= 0xFE0F)) {
+            return true;
+        }
+        if (codePoint >= 0x1F1E6 && codePoint <= 0x1F1FF) {
+            return true;
+        }
+        if (codePoint >= 0x1F3FB && codePoint <= 0x1F3FF) {
+            return true;
+        }
+        int type = Character.getType(codePoint);
+        return type == Character.OTHER_SYMBOL;
     }
 
     private void readStream(InputStream inputStream, final Message msg, final boolean thinkingEnabled) throws IOException {
@@ -761,6 +988,7 @@ public class MainActivity extends AppCompatActivity {
         if (thinkingEnabled) {
             adapter.setResponseLoaderVisible(msg, false);
             adapter.updateReasoningState(msg, displayThink, true, !isFinal, getReasoningDurationSeconds());
+            adapter.setResponseComplete(msg, isFinal);
             if (isFinal) {
                 stopReasoningTicker();
             }
@@ -770,6 +998,7 @@ public class MainActivity extends AppCompatActivity {
                 adapter.setResponseLoaderVisible(msg, false);
             }
             adapter.updateReasoningState(msg, "", false, false, 0);
+            adapter.setResponseComplete(msg, isFinal);
         }
         adapter.notifyDataSetChanged();
     }
