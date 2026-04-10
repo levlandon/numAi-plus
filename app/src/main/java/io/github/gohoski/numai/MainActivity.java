@@ -71,6 +71,7 @@ import cc.nnproject.json.JSONObject;
  */
 public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_PICK_IMAGE = 1;
+    private static final int REQUEST_CODE_SETTINGS = 2;
 
     private ApiService apiService;
     private ConfigManager config;
@@ -126,6 +127,11 @@ public class MainActivity extends AppCompatActivity {
     private Message speakingMessage;
     private Message editingMessage;
     private boolean lastRequestedThinkingEnabled;
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(LocaleHelper.wrap(newBase));
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -348,7 +354,7 @@ public class MainActivity extends AppCompatActivity {
         if (configBannerAction != null) {
             configBannerAction.setOnClickListener(new OnClickListener() {
                 public void onClick(View view) {
-                    startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+                    openSettingsScreen();
                 }
             });
         }
@@ -420,7 +426,7 @@ public class MainActivity extends AppCompatActivity {
         View profileButton = chatsPage.findViewById(R.id.profile_button);
         profileButton.setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
-                startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+                openSettingsScreen();
             }
         });
         updateProfileButtonAvatar();
@@ -453,6 +459,10 @@ public class MainActivity extends AppCompatActivity {
         profileButton.setPadding(padding, padding, padding, padding);
         profileButton.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         profileButton.setImageResource(R.drawable.ic_profile);
+    }
+
+    private void openSettingsScreen() {
+        startActivityForResult(new Intent(MainActivity.this, SettingsActivity.class), REQUEST_CODE_SETTINGS);
     }
 
     private void initializeActiveChat() {
@@ -720,11 +730,10 @@ public class MainActivity extends AppCompatActivity {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.settings:
-                startActivity(new Intent(this, SettingsActivity.class));
-                finish();
+                openSettingsScreen();
                 return true;
             case R.id.about:
-                Toast.makeText(this, "NumAI Plus " + BuildConfig.VERSION_NAME + " (" + BuildConfig.BUILD_TYPE + ") ▶\ngithub.com/gohoski/numAi", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, getString(R.string.app_version_toast, BuildConfig.VERSION_NAME, BuildConfig.BUILD_TYPE), Toast.LENGTH_SHORT).show();
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
@@ -735,6 +744,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == REQUEST_CODE_PICK_IMAGE && resultCode == RESULT_OK && data != null) {
             processSelectedImage(data.getData());
+        } else if (requestCode == REQUEST_CODE_SETTINGS && resultCode == RESULT_OK && data != null && data.getBooleanExtra("language_changed", false)) {
+            LocaleHelper.applyAppLocale(this);
+            recreate();
         }
     }
 
@@ -754,7 +766,7 @@ public class MainActivity extends AppCompatActivity {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            Toast.makeText(this, "Failed to load image", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.image_load_failed, Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -1509,10 +1521,10 @@ public class MainActivity extends AppCompatActivity {
         }
 
         StringBuffer details = new StringBuffer();
-        details.append("Raw error: ").append(rawError != null ? rawError : "").append('\n');
-        details.append("HTTP status: ").append(extractHttpStatus(rawError) != null ? extractHttpStatus(rawError) : "n/a").append('\n');
-        details.append("Provider: ").append(providerName != null ? providerName : "").append('\n');
-        details.append("Model: ").append(modelName != null ? modelName : "");
+        details.append(getString(R.string.error_details_raw, rawError != null ? rawError : "")).append('\n');
+        details.append(getString(R.string.error_details_http, extractHttpStatus(rawError) != null ? extractHttpStatus(rawError) : getString(R.string.not_available_short))).append('\n');
+        details.append(getString(R.string.error_details_provider, providerName != null ? providerName : "")).append('\n');
+        details.append(getString(R.string.error_details_model, modelName != null ? modelName : ""));
         return new ErrorDisplayData(title, summary, details.toString());
     }
 

@@ -1,21 +1,20 @@
 package io.github.gohoski.numai;
 
-import android.app.AlertDialog;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.ListPopupWindow;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.LayoutInflater;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -27,12 +26,15 @@ import android.widget.Toast;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Scanner;
 
 public class SettingsActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_IMPORT_KEY = 2;
     private static final int REQUEST_CODE_PICK_AVATAR = 3;
     private static final int REQUEST_CODE_CROP_AVATAR = 4;
+    private static final String OPTION_SYSTEM = "__system__";
+    private static final String OPTION_CUSTOM_PROVIDER = "__custom_provider__";
 
     private static final String OPTION_DEFAULT = "__default__";
 
@@ -63,16 +65,34 @@ public class SettingsActivity extends AppCompatActivity {
     private SelectorRow responseStyleSelector;
     private SelectorRow responseDetailSelector;
     private SelectorRow responseEmotionalitySelector;
+    private SelectorRow languageSelector;
+
+    private View customProviderContainer;
+    private EditText customProviderUrl;
+    private Button checkProviderConnection;
+    private TextView providerStatusLabel;
 
     private final ArrayList<String> cachedThinkingModels = new ArrayList<String>();
     private boolean fetchedThinkingModels = false;
+    private final Handler providerCheckHandler = new Handler();
+    private Runnable providerCheckRunnable;
 
     private String pendingAvatarPath;
     private String selectedProviderUrl;
+    private String selectedProviderType;
     private String selectedThinkingModel;
     private String selectedResponseStyle;
     private String selectedResponseDetailLevel;
     private String selectedResponseEmotionality;
+    private String selectedLanguage;
+    private String providerStatus = ConfigManager.PROVIDER_STATUS_UNKNOWN;
+    private long providerLastCheckTimestamp;
+    private boolean suppressCustomProviderWatcher;
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(LocaleHelper.wrap(newBase));
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -122,6 +142,10 @@ public class SettingsActivity extends AppCompatActivity {
         userRole = (EditText) findViewById(R.id.user_role);
         usageGoal = (EditText) findViewById(R.id.usage_goal);
         customSystemPrompt = (EditText) findViewById(R.id.custom_system_prompt);
+        customProviderContainer = findViewById(R.id.custom_provider_container);
+        customProviderUrl = (EditText) findViewById(R.id.custom_provider_url);
+        checkProviderConnection = (Button) findViewById(R.id.check_provider_connection);
+        providerStatusLabel = (TextView) findViewById(R.id.provider_status_label);
 
         sectionProfile = findViewById(R.id.section_profile);
         sectionPersonalization = findViewById(R.id.section_personalization);
@@ -138,6 +162,7 @@ public class SettingsActivity extends AppCompatActivity {
         responseStyleSelector = new SelectorRow(findViewById(R.id.response_style_selector));
         responseDetailSelector = new SelectorRow(findViewById(R.id.response_detail_selector));
         responseEmotionalitySelector = new SelectorRow(findViewById(R.id.response_emotionality_selector));
+        languageSelector = new SelectorRow(findViewById(R.id.language_selector));
     }
 
     private void setupTabs() {
@@ -203,6 +228,18 @@ public class SettingsActivity extends AppCompatActivity {
                 });
             }
         });
+
+        languageSelector.setTitle(getString(R.string.language));
+        languageSelector.root.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                showSingleOptionSelector(languageSelector.root, buildLanguageOptions(), selectedLanguage, new OptionSelectionListener() {
+                    public void onSelected(SelectionOption option) {
+                        selectedLanguage = option.value;
+                        languageSelector.setValue(option.label);
+                    }
+                });
+            }
+        });
     }
 
     private void setupButtons() {
@@ -235,6 +272,23 @@ public class SettingsActivity extends AppCompatActivity {
                 startActivity(new Intent(context, ModelVisibilityActivity.class));
             }
         });
+        checkProviderConnection.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                checkProviderConnection(false);
+            }
+        });
+        customProviderUrl.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            public void afterTextChanged(Editable editable) {
+                if (suppressCustomProviderWatcher) {
+                    return;
+                }
+                providerStatus = ConfigManager.PROVIDER_STATUS_UNKNOWN;
+                updateProviderStatusLabel();
+                scheduleProviderCheck();
+            }
+        });
     }
 
     private void loadFormState() {
@@ -247,18 +301,27 @@ public class SettingsActivity extends AppCompatActivity {
         customSystemPrompt.setText(config.getCustomSystemPrompt());
         pendingAvatarPath = config.getAvatarPath();
         selectedProviderUrl = conf.getBaseUrl();
+        selectedProviderType = resolveProviderType(conf.getBaseUrl());
         selectedThinkingModel = conf.getThinkingModel();
         selectedResponseStyle = emptyToDefault(config.getResponseStyle());
         selectedResponseDetailLevel = emptyToDefault(config.getResponseDetailLevel());
         selectedResponseEmotionality = emptyToDefault(config.getResponseEmotionality());
+        selectedLanguage = emptyToSystem(config.getAppLanguage());
+        providerStatus = config.getProviderStatus();
+        providerLastCheckTimestamp = config.getProviderLastCheckTimestamp();
 
-        providerSelector.setValue(resolveProviderLabel(selectedProviderUrl));
+        providerSelector.setValue(resolveProviderSelectionLabel());
         thinkingModelSelector.setValue(selectedThinkingModel != null && selectedThinkingModel.length() != 0
                 ? selectedThinkingModel
                 : getString(R.string.select_model));
         responseStyleSelector.setValue(findOptionLabel(buildStyleOptions(), selectedResponseStyle));
         responseDetailSelector.setValue(findOptionLabel(buildDetailOptions(), selectedResponseDetailLevel));
         responseEmotionalitySelector.setValue(findOptionLabel(buildEmotionalityOptions(), selectedResponseEmotionality));
+        languageSelector.setValue(findOptionLabel(buildLanguageOptions(), selectedLanguage));
+        suppressCustomProviderWatcher = true;
+        customProviderUrl.setText(isCustomProviderSelected() ? selectedProviderUrl : config.getProviderUrl());
+        suppressCustomProviderWatcher = false;
+        updateCustomProviderUi();
         renderAvatar();
         applyCachedThinkingModels();
         updateSelectedModelsSummary();
@@ -287,45 +350,25 @@ public class SettingsActivity extends AppCompatActivity {
         List<String> apiNames = ApiManager.getAllApiNames();
         for (int i = 0; i < apiNames.size(); i++) {
             String name = apiNames.get(i);
-            options.add(new SelectionOption(name, ApiManager.getUrlByName(name)));
+            options.add(new SelectionOption(name, name));
         }
-        options.add(new SelectionOption(getString(R.string.other), getString(R.string.other)));
-        showSingleOptionSelector(providerSelector.root, options, selectedProviderUrl, new OptionSelectionListener() {
+        options.add(new SelectionOption(getString(R.string.custom_provider), OPTION_CUSTOM_PROVIDER));
+        showSingleOptionSelector(providerSelector.root, options, selectedProviderType, new OptionSelectionListener() {
             public void onSelected(SelectionOption option) {
-                if (getString(R.string.other).equals(option.value)) {
-                    showCustomProviderDialog();
-                    return;
+                selectedProviderType = option.value;
+                if (OPTION_CUSTOM_PROVIDER.equals(option.value)) {
+                    if (selectedProviderUrl == null || selectedProviderUrl.length() == 0) {
+                        selectedProviderUrl = config.getProviderUrl();
+                    }
+                } else {
+                    selectedProviderUrl = ApiManager.getUrlByName(option.value);
+                    providerStatus = ConfigManager.PROVIDER_STATUS_UNKNOWN;
                 }
-                selectedProviderUrl = option.value;
                 providerSelector.setValue(option.label);
+                updateCustomProviderUi();
                 fetchedThinkingModels = false;
             }
         });
-    }
-
-    private void showCustomProviderDialog() {
-        final EditText editText = new EditText(this);
-        editText.setSingleLine();
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.other)
-                .setMessage(R.string.base_url)
-                .setView(editText)
-                .setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-                    public void onClick(DialogInterface dialogInterface, int i) {
-                        String customUrl = editText.getText().toString().trim();
-                        if (customUrl.length() == 0) {
-                            return;
-                        }
-                        if (customUrl.endsWith("/")) {
-                            customUrl = customUrl.substring(0, customUrl.length() - 1);
-                        }
-                        selectedProviderUrl = customUrl;
-                        providerSelector.setValue(customUrl);
-                        fetchedThinkingModels = false;
-                    }
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
     }
 
     private void loadThinkingModelsAndShow() {
@@ -431,6 +474,119 @@ public class SettingsActivity extends AppCompatActivity {
         avatarPreview.setImageResource(R.drawable.ic_profile);
     }
 
+    private void updateCustomProviderUi() {
+        boolean customSelected = isCustomProviderSelected();
+        customProviderContainer.setVisibility(customSelected ? View.VISIBLE : View.GONE);
+        if (customSelected) {
+            providerSelector.setValue(getString(R.string.custom_provider));
+            updateProviderStatusLabel();
+        }
+    }
+
+    private boolean isCustomProviderSelected() {
+        return OPTION_CUSTOM_PROVIDER.equals(selectedProviderType);
+    }
+
+    private void scheduleProviderCheck() {
+        if (!isCustomProviderSelected()) {
+            return;
+        }
+        if (providerCheckRunnable != null) {
+            providerCheckHandler.removeCallbacks(providerCheckRunnable);
+        }
+        providerCheckRunnable = new Runnable() {
+            public void run() {
+                checkProviderConnection(true);
+            }
+        };
+        providerCheckHandler.postDelayed(providerCheckRunnable, 1500L);
+    }
+
+    private void checkProviderConnection(final boolean silent) {
+        if (!isCustomProviderSelected()) {
+            return;
+        }
+        final String customUrl = normalizeProviderUrl(customProviderUrl.getText().toString());
+        if (customUrl.length() == 0) {
+            providerStatus = ConfigManager.PROVIDER_STATUS_UNKNOWN;
+            updateProviderStatusLabel();
+            return;
+        }
+        selectedProviderUrl = customUrl;
+        checkProviderConnection.setEnabled(false);
+        providerStatusLabel.setText(R.string.checking_connection);
+
+        final Config conf = config.getConfig();
+        final String originalBaseUrl = conf.getBaseUrl();
+        final String originalApiKey = conf.getApiKey();
+        final String candidateApiKey = keyText.getText().toString().trim();
+        config.updateBaseUrl(customUrl);
+        config.updateApiKey(candidateApiKey);
+
+        api.getModels(new ApiCallback<ArrayList<String>>() {
+            public void onSuccess(ArrayList<String> result) {
+                restoreProviderCheckConfig(originalBaseUrl, originalApiKey);
+                providerStatus = ConfigManager.PROVIDER_STATUS_OK;
+                providerLastCheckTimestamp = System.currentTimeMillis();
+                persistProviderCheckState(customUrl);
+                updateProviderStatusLabel();
+                checkProviderConnection.setEnabled(true);
+            }
+
+            public void onError(ApiError error) {
+                restoreProviderCheckConfig(originalBaseUrl, originalApiKey);
+                providerStatus = isReachableProviderError(error.getMessage())
+                        ? ConfigManager.PROVIDER_STATUS_OK
+                        : ConfigManager.PROVIDER_STATUS_FAILED;
+                providerLastCheckTimestamp = System.currentTimeMillis();
+                persistProviderCheckState(customUrl);
+                updateProviderStatusLabel();
+                checkProviderConnection.setEnabled(true);
+                if (!silent && providerStatus == ConfigManager.PROVIDER_STATUS_FAILED) {
+                    Toast.makeText(context, R.string.provider_connection_failed, Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    private void restoreProviderCheckConfig(String originalBaseUrl, String originalApiKey) {
+        config.updateBaseUrl(originalBaseUrl);
+        config.updateApiKey(originalApiKey);
+    }
+
+    private void persistProviderCheckState(String customUrl) {
+        config.setProviderType(selectedProviderType);
+        config.setProviderUrl(customUrl);
+        config.setProviderStatus(providerStatus);
+        config.setProviderLastCheckTimestamp(providerLastCheckTimestamp);
+    }
+
+    private void updateProviderStatusLabel() {
+        if (!isCustomProviderSelected()) {
+            providerStatusLabel.setText("");
+            return;
+        }
+        if (ConfigManager.PROVIDER_STATUS_OK.equals(providerStatus)) {
+            providerStatusLabel.setText(R.string.provider_status_ok);
+        } else if (ConfigManager.PROVIDER_STATUS_FAILED.equals(providerStatus)) {
+            providerStatusLabel.setText(R.string.provider_status_failed);
+        } else {
+            providerStatusLabel.setText(R.string.provider_status_unknown);
+        }
+    }
+
+    private boolean isReachableProviderError(String errorMessage) {
+        if (errorMessage == null) {
+            return false;
+        }
+        String normalized = errorMessage.toLowerCase(Locale.US);
+        return normalized.indexOf("401") != -1
+                || normalized.indexOf("403") != -1
+                || normalized.indexOf("unauthorized") != -1
+                || normalized.indexOf("forbidden") != -1
+                || normalized.indexOf("invalid api") != -1;
+    }
+
     private void importApiKey(Uri uri) {
         if (uri == null) {
             return;
@@ -456,9 +612,11 @@ public class SettingsActivity extends AppCompatActivity {
     private void saveSettings() {
         final Config conf = config.getConfig();
         final String apiKey = keyText.getText().toString().trim();
-        final String providerUrl = selectedProviderUrl != null ? selectedProviderUrl : conf.getBaseUrl();
+        final boolean languageChanged = !LocaleHelper.normalizeLanguage(config.getAppLanguage()).equals(LocaleHelper.normalizeLanguage(defaultSystemToEmpty(selectedLanguage)));
+        final String providerUrl = resolveSelectedProviderUrl(conf.getBaseUrl());
         final String thinkingModel = selectedThinkingModel != null ? selectedThinkingModel : conf.getThinkingModel();
 
+        config.setAppLanguage(defaultSystemToEmpty(selectedLanguage));
         config.setNickname(nickname.getText().toString().trim());
         config.setAvatarPath(pendingAvatarPath != null ? pendingAvatarPath : "");
         config.setUserName(userName.getText().toString().trim());
@@ -468,9 +626,14 @@ public class SettingsActivity extends AppCompatActivity {
         config.setResponseDetailLevel(defaultToEmpty(selectedResponseDetailLevel));
         config.setResponseEmotionality(defaultToEmpty(selectedResponseEmotionality));
         config.setCustomSystemPrompt(customSystemPrompt.getText().toString().trim());
+        config.setProviderType(selectedProviderType != null ? selectedProviderType : "");
+        config.setProviderUrl(providerUrl);
+        config.setProviderStatus(providerStatus);
+        config.setProviderLastCheckTimestamp(providerLastCheckTimestamp);
 
         if (providerUrl.equals(conf.getBaseUrl())) {
             config.setConfig(new Config(providerUrl, apiKey, conf.getChatModel(), thinkingModel, conf.getShrinkThink(), conf.getSystemPrompt(), conf.getUpdateDelay()));
+            setResult(languageChanged ? RESULT_OK : RESULT_CANCELED, buildSettingsResult(languageChanged));
             finish();
             return;
         }
@@ -491,6 +654,7 @@ public class SettingsActivity extends AppCompatActivity {
                 }
                 config.setConfig(new Config(providerUrl, apiKey, currentChatModel, currentThinkingModel, conf.getShrinkThink(), conf.getSystemPrompt(), conf.getUpdateDelay()));
                 loading.dismiss();
+                setResult(languageChanged ? RESULT_OK : RESULT_CANCELED, buildSettingsResult(languageChanged));
                 finish();
             }
 
@@ -532,6 +696,14 @@ public class SettingsActivity extends AppCompatActivity {
         return options;
     }
 
+    private ArrayList<SelectionOption> buildLanguageOptions() {
+        ArrayList<SelectionOption> options = new ArrayList<SelectionOption>();
+        options.add(new SelectionOption(getString(R.string.language_system_default), OPTION_SYSTEM));
+        options.add(new SelectionOption(getString(R.string.language_english), "en"));
+        options.add(new SelectionOption(getString(R.string.language_russian), "ru"));
+        return options;
+    }
+
     private String findOptionLabel(List<SelectionOption> options, String value) {
         for (int i = 0; i < options.size(); i++) {
             SelectionOption option = options.get(i);
@@ -553,6 +725,50 @@ public class SettingsActivity extends AppCompatActivity {
 
     private String defaultToEmpty(String value) {
         return OPTION_DEFAULT.equals(value) ? "" : value;
+    }
+
+    private String emptyToSystem(String value) {
+        return value == null || value.trim().length() == 0 ? OPTION_SYSTEM : value;
+    }
+
+    private String defaultSystemToEmpty(String value) {
+        return OPTION_SYSTEM.equals(value) ? "" : value;
+    }
+
+    private String resolveProviderType(String baseUrl) {
+        String providerName = ApiManager.getNameByUrl(baseUrl);
+        return providerName != null ? providerName : OPTION_CUSTOM_PROVIDER;
+    }
+
+    private String resolveProviderSelectionLabel() {
+        return isCustomProviderSelected()
+                ? getString(R.string.custom_provider)
+                : resolveProviderLabel(selectedProviderUrl);
+    }
+
+    private String normalizeProviderUrl(String url) {
+        String normalized = url != null ? url.trim() : "";
+        if (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized;
+    }
+
+    private String resolveSelectedProviderUrl(String fallbackUrl) {
+        if (isCustomProviderSelected()) {
+            String typedUrl = normalizeProviderUrl(customProviderUrl.getText().toString());
+            return typedUrl.length() != 0 ? typedUrl : fallbackUrl;
+        }
+        if (selectedProviderType != null && selectedProviderType.length() != 0) {
+            return ApiManager.getUrlByName(selectedProviderType);
+        }
+        return selectedProviderUrl != null ? selectedProviderUrl : fallbackUrl;
+    }
+
+    private Intent buildSettingsResult(boolean languageChanged) {
+        Intent result = new Intent();
+        result.putExtra("language_changed", languageChanged);
+        return result;
     }
 
     private int dpToPx(int dp) {

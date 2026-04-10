@@ -22,6 +22,7 @@ class ConfigManager {
         KEY_CACHED_MODELS = "cachedModels",
         KEY_CACHED_MODELS_URL = "cachedModelsUrl",
         KEY_ACTIVE_CHAT_ID = "activeChatId",
+        KEY_APP_LANGUAGE = "appLanguage",
         KEY_NICKNAME = "nickname",
         KEY_AVATAR_PATH = "avatarPath",
         KEY_USER_NAME = "user_name",
@@ -30,7 +31,15 @@ class ConfigManager {
         KEY_RESPONSE_STYLE = "response_style",
         KEY_RESPONSE_DETAIL_LEVEL = "response_detail_level",
         KEY_RESPONSE_EMOTIONALITY = "response_emotionality",
-        KEY_CUSTOM_SYSTEM_PROMPT = "custom_system_prompt";
+        KEY_CUSTOM_SYSTEM_PROMPT = "custom_system_prompt",
+        KEY_PROVIDER_TYPE = "provider_type",
+        KEY_PROVIDER_URL = "provider_url",
+        KEY_PROVIDER_STATUS = "provider_status",
+        KEY_PROVIDER_LAST_CHECK = "provider_last_check";
+
+    static final String PROVIDER_STATUS_UNKNOWN = "UNKNOWN";
+    static final String PROVIDER_STATUS_OK = "OK";
+    static final String PROVIDER_STATUS_FAILED = "FAILED";
 
     private static ConfigManager instance;
     private final SharedPreferences preferences;
@@ -69,6 +78,7 @@ class ConfigManager {
     private void saveConfig() {
         SharedPreferences.Editor editor = preferences.edit();
         editor.putString(KEY_BASE_URL, config.getBaseUrl());
+        editor.putString(KEY_PROVIDER_URL, config.getBaseUrl());
         editor.putString(KEY_API_KEY, config.getApiKey());
         editor.putString(KEY_CHAT_MODEL, config.getChatModel());
         editor.putString(KEY_THINKING_MODEL, config.getThinkingModel());
@@ -89,6 +99,7 @@ class ConfigManager {
 
     void updateBaseUrl(String baseUrl) {
         config.setBaseUrl(baseUrl);
+        preferences.edit().putString(KEY_PROVIDER_URL, baseUrl != null ? baseUrl : "").commit();
         saveConfig();
     }
 
@@ -148,6 +159,14 @@ class ConfigManager {
 
     void setActiveChatId(long chatId) {
         preferences.edit().putLong(KEY_ACTIVE_CHAT_ID, chatId).commit();
+    }
+
+    String getAppLanguage() {
+        return preferences.getString(KEY_APP_LANGUAGE, "");
+    }
+
+    void setAppLanguage(String language) {
+        preferences.edit().putString(KEY_APP_LANGUAGE, language != null ? language : "").commit();
     }
 
     String getNickname() {
@@ -220,6 +239,42 @@ class ConfigManager {
 
     void setCustomSystemPrompt(String value) {
         preferences.edit().putString(KEY_CUSTOM_SYSTEM_PROMPT, value != null ? value : "").commit();
+    }
+
+    String getProviderType() {
+        return preferences.getString(KEY_PROVIDER_TYPE, "");
+    }
+
+    void setProviderType(String value) {
+        preferences.edit().putString(KEY_PROVIDER_TYPE, value != null ? value : "").commit();
+    }
+
+    String getProviderUrl() {
+        String stored = preferences.getString(KEY_PROVIDER_URL, null);
+        if (stored != null) {
+            return stored;
+        }
+        return config.getBaseUrl();
+    }
+
+    void setProviderUrl(String value) {
+        preferences.edit().putString(KEY_PROVIDER_URL, value != null ? value : "").commit();
+    }
+
+    String getProviderStatus() {
+        return preferences.getString(KEY_PROVIDER_STATUS, PROVIDER_STATUS_UNKNOWN);
+    }
+
+    void setProviderStatus(String status) {
+        preferences.edit().putString(KEY_PROVIDER_STATUS, status != null ? status : PROVIDER_STATUS_UNKNOWN).commit();
+    }
+
+    long getProviderLastCheckTimestamp() {
+        return preferences.getLong(KEY_PROVIDER_LAST_CHECK, 0L);
+    }
+
+    void setProviderLastCheckTimestamp(long timestamp) {
+        preferences.edit().putLong(KEY_PROVIDER_LAST_CHECK, timestamp).commit();
     }
 
     private java.util.ArrayList<String> parseStoredModels(String raw) {

@@ -28,6 +28,11 @@ public class ModelVisibilityActivity extends AppCompatActivity {
     private View refreshButton;
 
     @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(LocaleHelper.wrap(newBase));
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_model_visibility);

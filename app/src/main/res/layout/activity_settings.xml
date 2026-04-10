@@ -40,7 +40,7 @@
             style="@style/AppSecondaryButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@android:string/cancel" />
+            android:text="@string/cancel_action" />
 
         <Button
             android:id="@+id/ok"
@@ -48,7 +48,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginLeft="8dp"
-            android:text="@android:string/ok" />
+            android:text="@string/save_action" />
     </LinearLayout>
 
     <ScrollView
@@ -161,6 +161,10 @@
                     android:layout_width="fill_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp" />
+
+                <include
+                    android:id="@+id/language_selector"
+                    layout="@layout/setting_selector_row" />
             </LinearLayout>
 
             <LinearLayout
@@ -288,6 +292,48 @@
                     android:text="@string/provider" />
 
                 <include android:id="@+id/provider_selector" layout="@layout/setting_selector_row" />
+
+                <LinearLayout
+                    android:id="@+id/custom_provider_container"
+                    android:layout_width="fill_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_toolbar_selector"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        style="@style/AppSectionTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/custom_provider" />
+
+                    <EditText
+                        android:id="@+id/custom_provider_url"
+                        style="@style/AppTextField"
+                        android:layout_width="fill_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:hint="@string/provider_url"
+                        android:inputType="textUri" />
+
+                    <Button
+                        android:id="@+id/check_provider_connection"
+                        style="@style/AppSecondaryButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="@string/check_connection" />
+
+                    <TextView
+                        android:id="@+id/provider_status_label"
+                        style="@style/AppMetaText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/provider_status_unknown" />
+                </LinearLayout>
 
                 <TextView
                     style="@style/AppSectionTitle"

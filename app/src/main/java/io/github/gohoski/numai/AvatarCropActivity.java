@@ -1,6 +1,7 @@
 package io.github.gohoski.numai;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
@@ -15,6 +16,11 @@ public class AvatarCropActivity extends Activity {
     private Uri sourceUri;
     private Bitmap sourceBitmap;
     private AvatarCropImageView cropView;
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(LocaleHelper.wrap(newBase));
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
