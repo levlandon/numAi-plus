@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="io.github.gohoski.numai">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-sdk tools:overrideLibrary="android.support.compat,android.support.coreui,android.support.coreutils,android.support.fragment,android.support.graphics.drawable,android.support.graphics.drawable.animated,android.support.mediacompat,android.support.v4,android.support.v7.appcompat,android.support.v7.cardview" />
     <application
         android:allowBackup="true"

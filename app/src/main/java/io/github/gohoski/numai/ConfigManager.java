@@ -2,6 +2,7 @@ package io.github.gohoski.numai;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import java.util.Locale;
 
 /**
  * Use this class to change preferences
@@ -35,7 +36,13 @@ class ConfigManager {
         KEY_PROVIDER_TYPE = "provider_type",
         KEY_PROVIDER_URL = "provider_url",
         KEY_PROVIDER_STATUS = "provider_status",
-        KEY_PROVIDER_LAST_CHECK = "provider_last_check";
+        KEY_PROVIDER_LAST_CHECK = "provider_last_check",
+        KEY_PROVIDER_URL_PREFIX = "provider_url_scoped",
+        KEY_PROVIDER_CHAT_MODEL_PREFIX = "provider_chat_model",
+        KEY_PROVIDER_THINKING_MODEL_PREFIX = "provider_thinking_model",
+        KEY_PROVIDER_SHOW_ALL_MODELS_PREFIX = "provider_show_all_models",
+        KEY_PROVIDER_SELECTED_MODELS_PREFIX = "provider_selected_models",
+        KEY_PROVIDER_CACHED_MODELS_PREFIX = "provider_cached_models";
 
     static final String PROVIDER_STATUS_UNKNOWN = "UNKNOWN";
     static final String PROVIDER_STATUS_OK = "OK";
@@ -65,10 +72,20 @@ class ConfigManager {
 
     // Load configuration from SharedPreferences
     private Config loadConfig() {
-        return new Config(preferences.getString(KEY_BASE_URL, "https://api.voidai.app/v1"),
+        String storedProviderType = preferences.getString(KEY_PROVIDER_TYPE, "");
+        String baseUrl = normalizeProviderUrl(storedProviderType, preferences.getString(KEY_BASE_URL, "https://api.voidai.app/v1"));
+        String chatModel = preferences.getString(KEY_CHAT_MODEL, "");
+        if (chatModel == null || chatModel.length() == 0) {
+            chatModel = getStoredProviderChatModel(baseUrl);
+        }
+        String thinkingModel = preferences.getString(KEY_THINKING_MODEL, "");
+        if (thinkingModel == null || thinkingModel.length() == 0) {
+            thinkingModel = getStoredProviderThinkingModel(baseUrl);
+        }
+        return new Config(baseUrl,
             preferences.getString(KEY_API_KEY, ""),
-            preferences.getString(KEY_CHAT_MODEL, ""),
-            preferences.getString(KEY_THINKING_MODEL, ""),
+            chatModel,
+            thinkingModel,
             preferences.getBoolean(KEY_SHRINK_THINK, false),
             preferences.getString(KEY_SYSTEM_PROMPT, ""),
             preferences.getInt(KEY_UPDATE_DELAY, 250));
@@ -94,12 +111,15 @@ class ConfigManager {
 
     void setConfig(Config config) {
         this.config = config;
+        setProviderChatModel(config.getBaseUrl(), config.getChatModel());
+        setProviderThinkingModel(config.getBaseUrl(), config.getThinkingModel());
         saveConfig();
     }
 
     void updateBaseUrl(String baseUrl) {
-        config.setBaseUrl(baseUrl);
-        preferences.edit().putString(KEY_PROVIDER_URL, baseUrl != null ? baseUrl : "").commit();
+        String normalized = normalizeProviderUrl(getProviderType(), baseUrl);
+        config.setBaseUrl(normalized);
+        preferences.edit().putString(KEY_PROVIDER_URL, normalized != null ? normalized : "").commit();
         saveConfig();
     }
 
@@ -110,10 +130,12 @@ class ConfigManager {
 
     void updateChatModel(String model) {
         config.setChatModel(model);
+        setProviderChatModel(config.getBaseUrl(), model);
         saveConfig();
     }
     void updateThinkingModel(String model) {
         config.setThinkingModel(model);
+        setProviderThinkingModel(config.getBaseUrl(), model);
         saveConfig();
     }
 
@@ -123,34 +145,109 @@ class ConfigManager {
     }
 
     boolean getShowAllModels() {
-        return preferences.getBoolean(KEY_SHOW_ALL_MODELS, true);
+        return getShowAllModels(config.getBaseUrl());
     }
 
     void setShowAllModels(boolean showAllModels) {
-        preferences.edit().putBoolean(KEY_SHOW_ALL_MODELS, showAllModels).commit();
+        setShowAllModels(config.getBaseUrl(), showAllModels);
     }
 
     java.util.ArrayList<String> getSelectedChatModels() {
-        return parseStoredModels(preferences.getString(KEY_SELECTED_MODELS, ""));
+        return getSelectedChatModels(config.getBaseUrl());
     }
 
     void setSelectedChatModels(java.util.List<String> models) {
-        preferences.edit().putString(KEY_SELECTED_MODELS, joinModels(models)).commit();
+        setSelectedChatModels(config.getBaseUrl(), models);
     }
 
     java.util.ArrayList<String> getCachedModels() {
-        String cachedBaseUrl = preferences.getString(KEY_CACHED_MODELS_URL, "");
-        if (cachedBaseUrl == null || !cachedBaseUrl.equals(config.getBaseUrl())) {
-            return new java.util.ArrayList<String>();
-        }
-        return parseStoredModels(preferences.getString(KEY_CACHED_MODELS, ""));
+        return getCachedModels(config.getBaseUrl());
     }
 
     void setCachedModels(java.util.List<String> models) {
+        setCachedModels(config.getBaseUrl(), models);
+    }
+
+    boolean getShowAllModels(String providerUrl) {
+        String scopedKey = scopedKey(KEY_PROVIDER_SHOW_ALL_MODELS_PREFIX, providerUrl);
+        if (preferences.contains(scopedKey)) {
+            return preferences.getBoolean(scopedKey, true);
+        }
+        return preferences.getBoolean(KEY_SHOW_ALL_MODELS, true);
+    }
+
+    void setShowAllModels(String providerUrl, boolean showAllModels) {
         SharedPreferences.Editor editor = preferences.edit();
-        editor.putString(KEY_CACHED_MODELS_URL, config.getBaseUrl());
-        editor.putString(KEY_CACHED_MODELS, joinModels(models));
+        editor.putBoolean(scopedKey(KEY_PROVIDER_SHOW_ALL_MODELS_PREFIX, providerUrl), showAllModels);
+        if (sameProvider(providerUrl, config.getBaseUrl())) {
+            editor.putBoolean(KEY_SHOW_ALL_MODELS, showAllModels);
+        }
         editor.commit();
+    }
+
+    java.util.ArrayList<String> getSelectedChatModels(String providerUrl) {
+        String scopedKey = scopedKey(KEY_PROVIDER_SELECTED_MODELS_PREFIX, providerUrl);
+        if (preferences.contains(scopedKey)) {
+            return parseStoredModels(preferences.getString(scopedKey, ""));
+        }
+        return parseStoredModels(preferences.getString(KEY_SELECTED_MODELS, ""));
+    }
+
+    void setSelectedChatModels(String providerUrl, java.util.List<String> models) {
+        String joined = joinModels(models);
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putString(scopedKey(KEY_PROVIDER_SELECTED_MODELS_PREFIX, providerUrl), joined);
+        if (sameProvider(providerUrl, config.getBaseUrl())) {
+            editor.putString(KEY_SELECTED_MODELS, joined);
+        }
+        editor.commit();
+    }
+
+    java.util.ArrayList<String> getCachedModels(String providerUrl) {
+        String scopedKey = scopedKey(KEY_PROVIDER_CACHED_MODELS_PREFIX, providerUrl);
+        if (preferences.contains(scopedKey)) {
+            return parseStoredModels(preferences.getString(scopedKey, ""));
+        }
+        String cachedBaseUrl = preferences.getString(KEY_CACHED_MODELS_URL, "");
+        if (sameProvider(providerUrl, cachedBaseUrl)) {
+            return parseStoredModels(preferences.getString(KEY_CACHED_MODELS, ""));
+        }
+        return new java.util.ArrayList<String>();
+    }
+
+    void setCachedModels(String providerUrl, java.util.List<String> models) {
+        String joined = joinModels(models);
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putString(scopedKey(KEY_PROVIDER_CACHED_MODELS_PREFIX, providerUrl), joined);
+        if (sameProvider(providerUrl, config.getBaseUrl())) {
+            editor.putString(KEY_CACHED_MODELS_URL, providerUrl);
+            editor.putString(KEY_CACHED_MODELS, joined);
+        }
+        editor.commit();
+    }
+
+    String getProviderChatModel(String providerUrl) {
+        String model = getStoredProviderChatModel(providerUrl);
+        if ((model == null || model.length() == 0) && sameProvider(providerUrl, config.getBaseUrl())) {
+            return config.getChatModel();
+        }
+        return model;
+    }
+
+    void setProviderChatModel(String providerUrl, String model) {
+        putNullableString(scopedKey(KEY_PROVIDER_CHAT_MODEL_PREFIX, providerUrl), model);
+    }
+
+    String getProviderThinkingModel(String providerUrl) {
+        String model = getStoredProviderThinkingModel(providerUrl);
+        if ((model == null || model.length() == 0) && sameProvider(providerUrl, config.getBaseUrl())) {
+            return config.getThinkingModel();
+        }
+        return model;
+    }
+
+    void setProviderThinkingModel(String providerUrl, String model) {
+        putNullableString(scopedKey(KEY_PROVIDER_THINKING_MODEL_PREFIX, providerUrl), model);
     }
 
     long getActiveChatId() {
@@ -258,7 +355,32 @@ class ConfigManager {
     }
 
     void setProviderUrl(String value) {
-        preferences.edit().putString(KEY_PROVIDER_URL, value != null ? value : "").commit();
+        String normalized = normalizeProviderUrl(getProviderType(), value);
+        preferences.edit().putString(KEY_PROVIDER_URL, normalized != null ? normalized : "").commit();
+    }
+
+    String getProviderUrlForType(String providerType, String fallbackUrl) {
+        String scoped = preferences.getString(scopedKey(KEY_PROVIDER_URL_PREFIX, providerType), null);
+        if (scoped != null && scoped.length() != 0) {
+            return normalizeProviderUrl(providerType, scoped);
+        }
+        if (providerType != null && providerType.equals(getProviderType())) {
+            String current = getProviderUrl();
+            if (current != null && current.length() != 0) {
+                return normalizeProviderUrl(providerType, current);
+            }
+        }
+        return normalizeProviderUrl(providerType, fallbackUrl);
+    }
+
+    void setProviderUrlForType(String providerType, String value) {
+        String safeValue = normalizeProviderUrl(providerType, value);
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putString(scopedKey(KEY_PROVIDER_URL_PREFIX, providerType), safeValue);
+        if (providerType != null && providerType.equals(getProviderType())) {
+            editor.putString(KEY_PROVIDER_URL, safeValue);
+        }
+        editor.commit();
     }
 
     String getProviderStatus() {
@@ -337,5 +459,81 @@ class ConfigManager {
 
     public boolean isConfigValid() {
         return config.isValid();
+    }
+
+    private void putNullableString(String key, String value) {
+        SharedPreferences.Editor editor = preferences.edit();
+        editor.putString(key, value != null ? value : "");
+        editor.commit();
+    }
+
+    private String getStoredProviderChatModel(String providerUrl) {
+        String scopedKey = scopedKey(KEY_PROVIDER_CHAT_MODEL_PREFIX, providerUrl);
+        if (preferences.contains(scopedKey)) {
+            return preferences.getString(scopedKey, "");
+        }
+        if (sameProvider(providerUrl, preferences.getString(KEY_BASE_URL, ""))) {
+            return preferences.getString(KEY_CHAT_MODEL, "");
+        }
+        return "";
+    }
+
+    private String getStoredProviderThinkingModel(String providerUrl) {
+        String scopedKey = scopedKey(KEY_PROVIDER_THINKING_MODEL_PREFIX, providerUrl);
+        if (preferences.contains(scopedKey)) {
+            return preferences.getString(scopedKey, "");
+        }
+        if (sameProvider(providerUrl, preferences.getString(KEY_BASE_URL, ""))) {
+            return preferences.getString(KEY_THINKING_MODEL, "");
+        }
+        return "";
+    }
+
+    private String scopedKey(String prefix, String providerUrl) {
+        return prefix + "_" + normalizeProviderKey(providerUrl);
+    }
+
+    private boolean sameProvider(String left, String right) {
+        return normalizeProviderKey(left).equals(normalizeProviderKey(right));
+    }
+
+    private String normalizeProviderKey(String providerUrl) {
+        String normalized = providerUrl != null ? providerUrl.trim().toLowerCase(Locale.US) : "";
+        if (normalized.length() == 0) {
+            normalized = "default";
+        }
+        StringBuffer buffer = new StringBuffer(normalized.length());
+        for (int i = 0; i < normalized.length(); i++) {
+            char ch = normalized.charAt(i);
+            if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+                buffer.append(ch);
+            } else {
+                buffer.append('_');
+            }
+        }
+        return buffer.toString();
+    }
+
+    private String normalizeProviderUrl(String providerType, String providerUrl) {
+        String normalized = providerUrl != null ? providerUrl.trim() : "";
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        if (!"LM Studio".equals(providerType) && !"Ollama".equals(providerType)) {
+            return normalized;
+        }
+        String lower = normalized.toLowerCase(Locale.US);
+        if (lower.endsWith("/chat/completions")) {
+            normalized = normalized.substring(0, normalized.length() - "/chat/completions".length());
+            lower = normalized.toLowerCase(Locale.US);
+        }
+        if (lower.endsWith("/models")) {
+            normalized = normalized.substring(0, normalized.length() - "/models".length());
+            lower = normalized.toLowerCase(Locale.US);
+        }
+        if (!lower.endsWith("/v1")) {
+            normalized = normalized + "/v1";
+        }
+        return normalized;
     }
 }

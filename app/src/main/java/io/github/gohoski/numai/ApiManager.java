@@ -16,13 +16,14 @@ class ApiManager {
 
     static {
         addApi("VoidAI", "https://api.voidai.app/v1");
-        addApi("Ollama", "https://ollama.com/v1");
+        addApi("Ollama", "http://127.0.0.1:11434/v1");
         addApi("NavyAI", "https://api.navy/v1");
         addApi("OpenRouter","https://openrouter.ai/api/v1");
         addApi("Baseten","https://inference.baseten.co/v1");
         addApi("Gemini","https://generativelanguage.googleapis.com/v1beta/openai");
         addApi("Together", "https://api.together.xyz/v1");
         addApi("Upstage", "https://api.upstage.ai/v1");
+        addApi("LM Studio", "http://127.0.0.1:1234/v1");
     }
 
     private static void addApi(String name, String url) {

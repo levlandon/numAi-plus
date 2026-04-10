@@ -245,6 +245,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         restoreCachedChatModels();
+        sanitizeThinkingModelForCurrentProvider();
         applyVisibleModelsToSelector();
         refreshChatList();
         updateProfileButtonAvatar();
@@ -324,10 +325,13 @@ public class MainActivity extends AppCompatActivity {
             public void onSuccess(ArrayList<String> result) {
                 config.setCachedModels(result);
                 restoreCachedChatModels();
+                sanitizeThinkingModelForCurrentProvider();
                 applyVisibleModelsToSelector();
                 modelsFetched = true;
                 loading.dismiss();
-                modelSelector.performClick();
+                if (modelSelectorAdapter != null && modelSelectorAdapter.getCount() > 0) {
+                    modelSelector.performClick();
+                }
             }
 
             @Override
@@ -342,6 +346,19 @@ public class MainActivity extends AppCompatActivity {
         allChatModels.clear();
         allChatModels.addAll(config.getCachedModels());
         modelsFetched = !allChatModels.isEmpty();
+    }
+
+    private void sanitizeThinkingModelForCurrentProvider() {
+        if (allChatModels.isEmpty()) {
+            return;
+        }
+        String currentThinkingModel = config.getConfig().getThinkingModel();
+        if (currentThinkingModel == null || currentThinkingModel.length() == 0 || !allChatModels.contains(currentThinkingModel)) {
+            String fallbackThinkingModel = ModelSelector.selectThinkingModel(allChatModels);
+            if (fallbackThinkingModel != null) {
+                config.updateThinkingModel(fallbackThinkingModel);
+            }
+        }
     }
 
     private void setupComposeActions() {
@@ -720,8 +737,10 @@ public class MainActivity extends AppCompatActivity {
         modelSelectorAdapter.setSelectedModel(currentModel);
         suppressModelSelection = true;
         modelSelector.setAdapter(modelSelectorAdapter);
-        int selectedIndex = visibleModels.indexOf(currentModel);
-        modelSelector.setSelection(selectedIndex >= 0 ? selectedIndex : 0);
+        if (!visibleModels.isEmpty()) {
+            int selectedIndex = visibleModels.indexOf(currentModel);
+            modelSelector.setSelection(selectedIndex >= 0 ? selectedIndex : 0);
+        }
     }
 
     
@@ -887,6 +906,20 @@ public class MainActivity extends AppCompatActivity {
     private void sendMessage() {
         String text = input.getText().toString().trim();
         if (text.length() == 0 && inputImages.isEmpty()) return;
+        if (!isChatModelReadyForSend()) {
+            Toast.makeText(this, R.string.model_not_available, Toast.LENGTH_SHORT).show();
+            updateComposerState();
+            return;
+        }
+        if (thinkingEnabled && !isThinkingModelReadyForSend()) {
+            Toast.makeText(this, R.string.model_not_available, Toast.LENGTH_SHORT).show();
+            updateComposerState();
+            return;
+        }
+        if (!inputImages.isEmpty() && !supportsAttachmentsForCurrentModel()) {
+            Toast.makeText(this, R.string.attachments_not_supported, Toast.LENGTH_LONG).show();
+            return;
+        }
         autoScroll = true;
         isCancelled = false;
         currentStream = null;
@@ -911,6 +944,38 @@ public class MainActivity extends AppCompatActivity {
         updateEmptyState();
         refreshChatList();
         requestAssistantResponse(this.thinkingEnabled, true);
+    }
+
+    private boolean supportsAttachmentsForCurrentModel() {
+        Config currentConfig = config.getConfig();
+        if (currentConfig == null) {
+            return false;
+        }
+        String modelName = currentConfig.getChatModel();
+        if (modelName == null) {
+            return false;
+        }
+        String normalized = modelName.toLowerCase(Locale.US);
+        return normalized.indexOf("vision") != -1
+                || normalized.indexOf("vl") != -1
+                || normalized.indexOf("gemini") != -1
+                || normalized.indexOf("gpt-4o") != -1
+                || normalized.indexOf("gpt-4.1") != -1
+                || normalized.indexOf("gpt-5") != -1
+                || normalized.indexOf("claude-3") != -1
+                || normalized.indexOf("claude-4") != -1
+                || normalized.indexOf("pixtral") != -1
+                || normalized.indexOf("llava") != -1;
+    }
+
+    private boolean isChatModelReadyForSend() {
+        String chatModel = config.getConfig().getChatModel();
+        return chatModel != null && chatModel.length() != 0 && (allChatModels.isEmpty() || allChatModels.contains(chatModel));
+    }
+
+    private boolean isThinkingModelReadyForSend() {
+        String thinkingModel = config.getConfig().getThinkingModel();
+        return thinkingModel != null && thinkingModel.length() != 0 && (allChatModels.isEmpty() || allChatModels.contains(thinkingModel));
     }
 
     private void ensureActiveChatForSend() {
@@ -999,6 +1064,16 @@ public class MainActivity extends AppCompatActivity {
     private void requestAssistantResponse(final boolean thinkingEnabled, boolean rollbackUserOnStop) {
         if (!hasValidChatConfig()) {
             updateComposerState();
+            return;
+        }
+        if (!isChatModelReadyForSend()) {
+            Toast.makeText(this, R.string.model_not_available, Toast.LENGTH_SHORT).show();
+            updateComposerState();
+            return;
+        }
+        if (thinkingEnabled && !isThinkingModelReadyForSend()) {
+            Toast.makeText(this, R.string.model_not_available, Toast.LENGTH_SHORT).show();
+            resetUIState();
             return;
         }
         lastRequestedThinkingEnabled = thinkingEnabled;

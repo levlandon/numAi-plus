@@ -333,6 +333,62 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:text="@string/provider_status_unknown" />
+
+                    <LinearLayout
+                        android:id="@+id/provider_diagnostics_container"
+                        android:layout_width="fill_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/bg_toolbar_selector"
+                        android:orientation="vertical"
+                        android:padding="14dp"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/provider_diagnostics_gateway"
+                            style="@style/AppMetaText"
+                            android:layout_width="fill_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/diagnostics_gateway_pending"
+                            android:typeface="monospace" />
+
+                        <TextView
+                            android:id="@+id/provider_diagnostics_local"
+                            style="@style/AppMetaText"
+                            android:layout_width="fill_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="@string/diagnostics_local_pending"
+                            android:typeface="monospace" />
+
+                        <TextView
+                            android:id="@+id/provider_diagnostics_internet"
+                            style="@style/AppMetaText"
+                            android:layout_width="fill_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="@string/diagnostics_internet_pending"
+                            android:typeface="monospace" />
+
+                        <TextView
+                            android:id="@+id/provider_diagnostics_provider"
+                            style="@style/AppMetaText"
+                            android:layout_width="fill_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="@string/diagnostics_provider_pending"
+                            android:typeface="monospace" />
+
+                        <TextView
+                            android:id="@+id/provider_diagnostics_hint"
+                            style="@style/AppMetaText"
+                            android:layout_width="fill_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="@string/diagnostics_router_hint"
+                            android:textColor="@color/textSecondary"
+                            android:visibility="gone" />
+                    </LinearLayout>
                 </LinearLayout>
 
                 <TextView

@@ -20,6 +20,9 @@ public class ModelVisibilityActivity extends AppCompatActivity {
     private Context context;
     private ConfigManager config;
     private ApiService api;
+    private String providerUrl;
+    private String providerType;
+    private String apiKey;
     private ListView modelsList;
     private final ArrayList<String> models = new ArrayList<String>();
     private final ArrayList<String> selectedModels = new ArrayList<String>();
@@ -45,8 +48,20 @@ public class ModelVisibilityActivity extends AppCompatActivity {
         context = this;
         config = ConfigManager.getInstance(this);
         api = new ApiService(this);
-        selectedModels.addAll(config.getSelectedChatModels());
-        showAllModels = config.getShowAllModels();
+        providerUrl = getIntent().getStringExtra("provider_url");
+        providerType = getIntent().getStringExtra("provider_type");
+        apiKey = getIntent().getStringExtra("api_key");
+        if (providerUrl == null || providerUrl.length() == 0) {
+            providerUrl = config.getConfig().getBaseUrl();
+        }
+        if (providerType == null || providerType.length() == 0) {
+            providerType = config.getProviderType();
+        }
+        if (apiKey == null) {
+            apiKey = config.getConfig().getApiKey();
+        }
+        selectedModels.addAll(config.getSelectedChatModels(providerUrl));
+        showAllModels = config.getShowAllModels(providerUrl);
 
         modelsList = (ListView) findViewById(R.id.models_list);
         refreshButton = findViewById(R.id.refresh_models_button);
@@ -62,7 +77,7 @@ public class ModelVisibilityActivity extends AppCompatActivity {
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 if (position == 0) {
                     showAllModels = !showAllModels;
-                    config.setShowAllModels(showAllModels);
+                    config.setShowAllModels(providerUrl, showAllModels);
                     adapter.notifyDataSetChanged();
                     return;
                 }
@@ -73,7 +88,7 @@ public class ModelVisibilityActivity extends AppCompatActivity {
                 } else {
                     selectedModels.add(model);
                 }
-                config.setSelectedChatModels(selectedModels);
+                config.setSelectedChatModels(providerUrl, selectedModels);
                 adapter.notifyDataSetChanged();
             }
         });
@@ -95,7 +110,8 @@ public class ModelVisibilityActivity extends AppCompatActivity {
 
     private void restoreCachedModels() {
         models.clear();
-        models.addAll(config.getCachedModels());
+        models.addAll(config.getCachedModels(providerUrl));
+        trimInvalidSelections();
         if (adapter != null) {
             adapter.notifyDataSetChanged();
         }
@@ -106,12 +122,13 @@ public class ModelVisibilityActivity extends AppCompatActivity {
         if (refreshButton != null) {
             refreshButton.setEnabled(false);
         }
-        api.getModels(new ApiCallback<ArrayList<String>>() {
+        fetchModelsForProvider(providerUrl, apiKey, new ApiCallback<ArrayList<String>>() {
             @Override
             public void onSuccess(ArrayList<String> result) {
-                config.setCachedModels(result);
+                config.setCachedModels(providerUrl, result);
                 models.clear();
                 models.addAll(result);
+                trimInvalidSelections();
                 adapter.notifyDataSetChanged();
                 if (loading != null) {
                     loading.dismiss();
@@ -123,6 +140,9 @@ public class ModelVisibilityActivity extends AppCompatActivity {
 
             @Override
             public void onError(ApiError error) {
+                models.clear();
+                trimInvalidSelections();
+                adapter.notifyDataSetChanged();
                 if (loading != null) {
                     loading.dismiss();
                 }
@@ -130,6 +150,41 @@ public class ModelVisibilityActivity extends AppCompatActivity {
                     refreshButton.setEnabled(true);
                 }
                 Toast.makeText(context, error.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void trimInvalidSelections() {
+        if (models.isEmpty()) {
+            return;
+        }
+        for (int i = selectedModels.size() - 1; i >= 0; i--) {
+            if (!models.contains(selectedModels.get(i))) {
+                selectedModels.remove(i);
+            }
+        }
+        config.setSelectedChatModels(providerUrl, selectedModels);
+    }
+
+    private void fetchModelsForProvider(String providerUrl, String apiKey, final ApiCallback<ArrayList<String>> callback) {
+        final Config conf = config.getConfig();
+        final String originalBaseUrl = conf.getBaseUrl();
+        final String originalApiKey = conf.getApiKey();
+        conf.setBaseUrl(providerUrl);
+        conf.setApiKey(apiKey);
+        api.getModels(new ApiCallback<ArrayList<String>>() {
+            @Override
+            public void onSuccess(ArrayList<String> result) {
+                conf.setBaseUrl(originalBaseUrl);
+                conf.setApiKey(originalApiKey);
+                callback.onSuccess(result != null ? result : new ArrayList<String>());
+            }
+
+            @Override
+            public void onError(ApiError error) {
+                conf.setBaseUrl(originalBaseUrl);
+                conf.setApiKey(originalApiKey);
+                callback.onError(error);
             }
         });
     }

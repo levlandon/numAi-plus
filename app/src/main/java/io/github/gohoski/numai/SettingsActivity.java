@@ -2,11 +2,13 @@ package io.github.gohoski.numai;
 
 import android.content.Context;
 import android.content.Intent;
+import android.net.DhcpInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
+import android.net.wifi.WifiManager;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.ListPopupWindow;
 import android.text.Editable;
@@ -24,7 +26,13 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Scanner;
@@ -35,6 +43,7 @@ public class SettingsActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_CROP_AVATAR = 4;
     private static final String OPTION_SYSTEM = "__system__";
     private static final String OPTION_CUSTOM_PROVIDER = "__custom_provider__";
+    private static final String PROVIDER_LM_STUDIO = "LM Studio";
 
     private static final String OPTION_DEFAULT = "__default__";
 
@@ -71,11 +80,19 @@ public class SettingsActivity extends AppCompatActivity {
     private EditText customProviderUrl;
     private Button checkProviderConnection;
     private TextView providerStatusLabel;
+    private View providerDiagnosticsContainer;
+    private TextView providerDiagnosticsGateway;
+    private TextView providerDiagnosticsLocal;
+    private TextView providerDiagnosticsInternet;
+    private TextView providerDiagnosticsProvider;
+    private TextView providerDiagnosticsHint;
 
     private final ArrayList<String> cachedThinkingModels = new ArrayList<String>();
+    private final HashMap<String, String> pendingProviderUrls = new HashMap<String, String>();
     private boolean fetchedThinkingModels = false;
     private final Handler providerCheckHandler = new Handler();
     private Runnable providerCheckRunnable;
+    private int providerDiagnosticsVersion;
 
     private String pendingAvatarPath;
     private String selectedProviderUrl;
@@ -88,6 +105,7 @@ public class SettingsActivity extends AppCompatActivity {
     private String providerStatus = ConfigManager.PROVIDER_STATUS_UNKNOWN;
     private long providerLastCheckTimestamp;
     private boolean suppressCustomProviderWatcher;
+    private boolean providerCheckRunning;
 
     @Override
     protected void attachBaseContext(Context newBase) {
@@ -146,6 +164,12 @@ public class SettingsActivity extends AppCompatActivity {
         customProviderUrl = (EditText) findViewById(R.id.custom_provider_url);
         checkProviderConnection = (Button) findViewById(R.id.check_provider_connection);
         providerStatusLabel = (TextView) findViewById(R.id.provider_status_label);
+        providerDiagnosticsContainer = findViewById(R.id.provider_diagnostics_container);
+        providerDiagnosticsGateway = (TextView) findViewById(R.id.provider_diagnostics_gateway);
+        providerDiagnosticsLocal = (TextView) findViewById(R.id.provider_diagnostics_local);
+        providerDiagnosticsInternet = (TextView) findViewById(R.id.provider_diagnostics_internet);
+        providerDiagnosticsProvider = (TextView) findViewById(R.id.provider_diagnostics_provider);
+        providerDiagnosticsHint = (TextView) findViewById(R.id.provider_diagnostics_hint);
 
         sectionProfile = findViewById(R.id.section_profile);
         sectionPersonalization = findViewById(R.id.section_personalization);
@@ -269,7 +293,11 @@ public class SettingsActivity extends AppCompatActivity {
         });
         findViewById(R.id.selected_models_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) {
-                startActivity(new Intent(context, ModelVisibilityActivity.class));
+                Intent intent = new Intent(context, ModelVisibilityActivity.class);
+                intent.putExtra("provider_url", resolveProviderUrlForSelection());
+                intent.putExtra("provider_type", selectedProviderType);
+                intent.putExtra("api_key", keyText.getText().toString().trim());
+                startActivity(intent);
             }
         });
         checkProviderConnection.setOnClickListener(new View.OnClickListener() {
@@ -302,7 +330,12 @@ public class SettingsActivity extends AppCompatActivity {
         pendingAvatarPath = config.getAvatarPath();
         selectedProviderUrl = conf.getBaseUrl();
         selectedProviderType = resolveProviderType(conf.getBaseUrl());
-        selectedThinkingModel = conf.getThinkingModel();
+        String storedProviderType = config.getProviderType();
+        if (storedProviderType != null && storedProviderType.length() != 0) {
+            selectedProviderType = storedProviderType;
+        }
+        selectedProviderUrl = config.getProviderUrlForType(selectedProviderType, selectedProviderUrl);
+        selectedThinkingModel = resolveProviderThinkingModel(selectedProviderUrl, conf.getThinkingModel());
         selectedResponseStyle = emptyToDefault(config.getResponseStyle());
         selectedResponseDetailLevel = emptyToDefault(config.getResponseDetailLevel());
         selectedResponseEmotionality = emptyToDefault(config.getResponseEmotionality());
@@ -319,7 +352,7 @@ public class SettingsActivity extends AppCompatActivity {
         responseEmotionalitySelector.setValue(findOptionLabel(buildEmotionalityOptions(), selectedResponseEmotionality));
         languageSelector.setValue(findOptionLabel(buildLanguageOptions(), selectedLanguage));
         suppressCustomProviderWatcher = true;
-        customProviderUrl.setText(isCustomProviderSelected() ? selectedProviderUrl : config.getProviderUrl());
+        customProviderUrl.setText(isUrlEditableProviderSelected() ? selectedProviderUrl : config.getProviderUrlForType(selectedProviderType, selectedProviderUrl));
         suppressCustomProviderWatcher = false;
         updateCustomProviderUi();
         renderAvatar();
@@ -355,18 +388,22 @@ public class SettingsActivity extends AppCompatActivity {
         options.add(new SelectionOption(getString(R.string.custom_provider), OPTION_CUSTOM_PROVIDER));
         showSingleOptionSelector(providerSelector.root, options, selectedProviderType, new OptionSelectionListener() {
             public void onSelected(SelectionOption option) {
+                rememberPendingProviderUrl();
                 selectedProviderType = option.value;
-                if (OPTION_CUSTOM_PROVIDER.equals(option.value)) {
-                    if (selectedProviderUrl == null || selectedProviderUrl.length() == 0) {
-                        selectedProviderUrl = config.getProviderUrl();
-                    }
+                if (isUrlEditableProvider(option.value)) {
+                    String pendingUrl = pendingProviderUrls.get(option.value);
+                    selectedProviderUrl = pendingUrl != null && pendingUrl.length() != 0
+                            ? pendingUrl
+                            : config.getProviderUrlForType(option.value, ApiManager.getUrlByName(option.value));
                 } else {
                     selectedProviderUrl = ApiManager.getUrlByName(option.value);
                     providerStatus = ConfigManager.PROVIDER_STATUS_UNKNOWN;
                 }
+                selectedThinkingModel = config.getProviderThinkingModel(selectedProviderUrl);
                 providerSelector.setValue(option.label);
                 updateCustomProviderUi();
-                fetchedThinkingModels = false;
+                applyCachedThinkingModels();
+                updateSelectedModelsSummary();
             }
         });
     }
@@ -376,12 +413,14 @@ public class SettingsActivity extends AppCompatActivity {
             showThinkingModelSelector();
             return;
         }
+        final String providerUrl = resolveProviderUrlForSelection();
+        final String apiKey = keyText.getText().toString().trim();
         final Loading loading = new Loading(context);
-        api.getModels(new ApiCallback<ArrayList<String>>() {
+        fetchModelsForProvider(providerUrl, apiKey, new ApiCallback<ArrayList<String>>() {
             public void onSuccess(ArrayList<String> result) {
                 cachedThinkingModels.clear();
                 cachedThinkingModels.addAll(result);
-                config.setCachedModels(result);
+                config.setCachedModels(providerUrl, result);
                 fetchedThinkingModels = !result.isEmpty();
                 loading.dismiss();
                 showThinkingModelSelector();
@@ -395,6 +434,10 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showThinkingModelSelector() {
+        if (cachedThinkingModels.isEmpty()) {
+            Toast.makeText(context, R.string.no_models_available, Toast.LENGTH_SHORT).show();
+            return;
+        }
         ArrayList<SelectionOption> options = new ArrayList<SelectionOption>();
         for (int i = 0; i < cachedThinkingModels.size(); i++) {
             String model = cachedThinkingModels.get(i);
@@ -410,6 +453,10 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void showSingleOptionSelector(View anchor, final List<SelectionOption> options, String selectedValue,
                                           final OptionSelectionListener listener) {
+        if (options == null || options.isEmpty()) {
+            Toast.makeText(this, R.string.no_models_available, Toast.LENGTH_SHORT).show();
+            return;
+        }
         final ListPopupWindow popupWindow = new ListPopupWindow(this);
         popupWindow.setAnchorView(anchor);
         popupWindow.setAdapter(new SelectorPopupAdapter(options, selectedValue));
@@ -435,20 +482,28 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void applyCachedThinkingModels() {
         cachedThinkingModels.clear();
-        cachedThinkingModels.addAll(config.getCachedModels());
+        cachedThinkingModels.addAll(config.getCachedModels(resolveProviderUrlForSelection()));
         fetchedThinkingModels = !cachedThinkingModels.isEmpty();
         if ((selectedThinkingModel == null || selectedThinkingModel.length() == 0) && !cachedThinkingModels.isEmpty()) {
             selectedThinkingModel = cachedThinkingModels.get(0);
+            thinkingModelSelector.setValue(selectedThinkingModel);
+        } else if (selectedThinkingModel != null && selectedThinkingModel.length() != 0 && !cachedThinkingModels.contains(selectedThinkingModel) && !cachedThinkingModels.isEmpty()) {
+            selectedThinkingModel = cachedThinkingModels.get(0);
+            thinkingModelSelector.setValue(selectedThinkingModel);
+        } else if (selectedThinkingModel == null || selectedThinkingModel.length() == 0) {
+            thinkingModelSelector.setValue(getString(R.string.select_model));
+        } else {
             thinkingModelSelector.setValue(selectedThinkingModel);
         }
     }
 
     private void updateSelectedModelsSummary() {
-        if (config.getShowAllModels()) {
+        String providerUrl = resolveProviderUrlForSelection();
+        if (config.getShowAllModels(providerUrl)) {
             selectedModelsSummary.setText(R.string.selected_models_all_summary);
             return;
         }
-        int count = config.getSelectedChatModels().size();
+        int count = config.getSelectedChatModels(providerUrl).size();
         if (count == 0) {
             selectedModelsSummary.setText(R.string.selected_models_none_summary);
         } else {
@@ -476,10 +531,29 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void updateCustomProviderUi() {
         boolean customSelected = isCustomProviderSelected();
-        customProviderContainer.setVisibility(customSelected ? View.VISIBLE : View.GONE);
-        if (customSelected) {
-            providerSelector.setValue(getString(R.string.custom_provider));
+        boolean urlEditableSelected = isUrlEditableProviderSelected();
+        customProviderContainer.setVisibility(urlEditableSelected ? View.VISIBLE : View.GONE);
+        if (!urlEditableSelected) {
+            if (providerCheckRunnable != null) {
+                providerCheckHandler.removeCallbacks(providerCheckRunnable);
+            }
+            providerDiagnosticsVersion++;
+            providerCheckRunning = false;
+            checkProviderConnection.setEnabled(true);
+            hideDiagnostics();
+        }
+        if (urlEditableSelected) {
+            providerSelector.setValue(resolveProviderSelectionLabel());
+            suppressCustomProviderWatcher = true;
+            customProviderUrl.setText(selectedProviderUrl != null ? selectedProviderUrl : "");
+            suppressCustomProviderWatcher = false;
+            checkProviderConnection.setEnabled(!providerCheckRunning);
             updateProviderStatusLabel();
+            if (!customSelected) {
+                hideDiagnostics();
+            } else {
+                providerDiagnosticsContainer.setVisibility(View.GONE);
+            }
         }
     }
 
@@ -487,8 +561,25 @@ public class SettingsActivity extends AppCompatActivity {
         return OPTION_CUSTOM_PROVIDER.equals(selectedProviderType);
     }
 
+    private boolean isUrlEditableProviderSelected() {
+        return isUrlEditableProvider(selectedProviderType);
+    }
+
+    private boolean isUrlEditableProvider(String providerType) {
+        return OPTION_CUSTOM_PROVIDER.equals(providerType)
+                || PROVIDER_LM_STUDIO.equals(providerType)
+                || "Ollama".equals(providerType);
+    }
+
+    private void rememberPendingProviderUrl() {
+        if (!isUrlEditableProviderSelected()) {
+            return;
+        }
+        pendingProviderUrls.put(selectedProviderType, normalizeProviderUrl(customProviderUrl.getText().toString()));
+    }
+
     private void scheduleProviderCheck() {
-        if (!isCustomProviderSelected()) {
+        if (!isUrlEditableProviderSelected()) {
             return;
         }
         if (providerCheckRunnable != null) {
@@ -503,55 +594,64 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void checkProviderConnection(final boolean silent) {
-        if (!isCustomProviderSelected()) {
+        if (!isUrlEditableProviderSelected()) {
             return;
         }
         final String customUrl = normalizeProviderUrl(customProviderUrl.getText().toString());
         if (customUrl.length() == 0) {
+            if (providerCheckRunnable != null) {
+                providerCheckHandler.removeCallbacks(providerCheckRunnable);
+            }
             providerStatus = ConfigManager.PROVIDER_STATUS_UNKNOWN;
             updateProviderStatusLabel();
+            hideDiagnostics();
             return;
         }
         selectedProviderUrl = customUrl;
+        providerCheckRunning = true;
+        final int diagnosticsVersion = ++providerDiagnosticsVersion;
         checkProviderConnection.setEnabled(false);
         providerStatusLabel.setText(R.string.checking_connection);
-
-        final Config conf = config.getConfig();
-        final String originalBaseUrl = conf.getBaseUrl();
-        final String originalApiKey = conf.getApiKey();
         final String candidateApiKey = keyText.getText().toString().trim();
-        config.updateBaseUrl(customUrl);
-        config.updateApiKey(candidateApiKey);
+        final Config currentConfig = config.getConfig();
+        final String originalBaseUrl = currentConfig.getBaseUrl();
+        final String originalApiKey = currentConfig.getApiKey();
+        currentConfig.setBaseUrl(customUrl);
+        currentConfig.setApiKey(candidateApiKey);
+        showDiagnosticsPending();
+        new Thread(new Runnable() {
+            public void run() {
+                boolean gatewayOk = false;
+                boolean localOk = false;
+                boolean internetOk = false;
+                boolean providerOk = false;
+                try {
+                    String gatewayHost = resolveGatewayHost();
+                    gatewayOk = gatewayHost != null && checkHostReachable(gatewayHost, 1500);
+                    postDiagnosticStep(diagnosticsVersion, providerDiagnosticsGateway, R.string.diagnostics_gateway_label, gatewayOk);
+                    if (!gatewayOk) {
+                        finishProviderDiagnostics(diagnosticsVersion, customUrl, false);
+                        return;
+                    }
 
-        api.getModels(new ApiCallback<ArrayList<String>>() {
-            public void onSuccess(ArrayList<String> result) {
-                restoreProviderCheckConfig(originalBaseUrl, originalApiKey);
-                providerStatus = ConfigManager.PROVIDER_STATUS_OK;
-                providerLastCheckTimestamp = System.currentTimeMillis();
-                persistProviderCheckState(customUrl);
-                updateProviderStatusLabel();
-                checkProviderConnection.setEnabled(true);
-            }
+                    Uri providerUri = Uri.parse(customUrl);
+                    String providerHost = providerUri.getHost();
+                    int providerPort = resolvePort(providerUri);
+                    localOk = providerHost != null && providerPort > 0 && checkSocketReachable(providerHost, providerPort, 2000);
+                    postDiagnosticStep(diagnosticsVersion, providerDiagnosticsLocal, R.string.diagnostics_local_label, localOk);
+                    if (!localOk) {
+                        finishProviderDiagnostics(diagnosticsVersion, customUrl, false);
+                        return;
+                    }
 
-            public void onError(ApiError error) {
-                restoreProviderCheckConfig(originalBaseUrl, originalApiKey);
-                providerStatus = isReachableProviderError(error.getMessage())
-                        ? ConfigManager.PROVIDER_STATUS_OK
-                        : ConfigManager.PROVIDER_STATUS_FAILED;
-                providerLastCheckTimestamp = System.currentTimeMillis();
-                persistProviderCheckState(customUrl);
-                updateProviderStatusLabel();
-                checkProviderConnection.setEnabled(true);
-                if (!silent && providerStatus == ConfigManager.PROVIDER_STATUS_FAILED) {
-                    Toast.makeText(context, R.string.provider_connection_failed, Toast.LENGTH_SHORT).show();
+                    internetOk = checkSocketReachable("example.com", 80, 2500);
+                    postDiagnosticStep(diagnosticsVersion, providerDiagnosticsInternet, R.string.diagnostics_internet_label, internetOk);
+                    checkProviderReachability(diagnosticsVersion, customUrl, candidateApiKey, gatewayOk, internetOk);
+                } catch (Exception ignored) {
+                    finishProviderDiagnostics(diagnosticsVersion, customUrl, false);
                 }
             }
-        });
-    }
-
-    private void restoreProviderCheckConfig(String originalBaseUrl, String originalApiKey) {
-        config.updateBaseUrl(originalBaseUrl);
-        config.updateApiKey(originalApiKey);
+        }).start();
     }
 
     private void persistProviderCheckState(String customUrl) {
@@ -561,8 +661,14 @@ public class SettingsActivity extends AppCompatActivity {
         config.setProviderLastCheckTimestamp(providerLastCheckTimestamp);
     }
 
+    private void restoreProviderCheckConfig(String originalBaseUrl, String originalApiKey) {
+        Config conf = config.getConfig();
+        conf.setBaseUrl(originalBaseUrl);
+        conf.setApiKey(originalApiKey);
+    }
+
     private void updateProviderStatusLabel() {
-        if (!isCustomProviderSelected()) {
+        if (!isUrlEditableProviderSelected()) {
             providerStatusLabel.setText("");
             return;
         }
@@ -573,6 +679,191 @@ public class SettingsActivity extends AppCompatActivity {
         } else {
             providerStatusLabel.setText(R.string.provider_status_unknown);
         }
+    }
+
+    private void showDiagnosticsPending() {
+        providerDiagnosticsContainer.setVisibility(View.VISIBLE);
+        providerDiagnosticsHint.setVisibility(View.GONE);
+        setDiagnosticText(providerDiagnosticsGateway, R.string.diagnostics_gateway_label, R.string.diagnostics_status_pending);
+        setDiagnosticText(providerDiagnosticsLocal, R.string.diagnostics_local_label, R.string.diagnostics_status_pending);
+        setDiagnosticText(providerDiagnosticsInternet, R.string.diagnostics_internet_label, R.string.diagnostics_status_pending);
+        setDiagnosticText(providerDiagnosticsProvider, R.string.diagnostics_provider_label, R.string.diagnostics_status_pending);
+    }
+
+    private void hideDiagnostics() {
+        providerDiagnosticsContainer.setVisibility(View.GONE);
+        providerDiagnosticsHint.setVisibility(View.GONE);
+    }
+
+    private void setDiagnosticText(TextView view, int labelResId, int statusResId) {
+        String label = getString(labelResId);
+        String status = getString(statusResId);
+        view.setText(label + "\t" + status);
+    }
+
+    private void postDiagnosticStep(final int diagnosticsVersion, final TextView view, final int labelResId, final boolean success) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (diagnosticsVersion != providerDiagnosticsVersion || !isUrlEditableProviderSelected()) {
+                    return;
+                }
+                setDiagnosticText(view, labelResId, success ? R.string.diagnostics_status_success : R.string.diagnostics_status_failed);
+            }
+        });
+    }
+
+    private void postDiagnosticsHint(final int diagnosticsVersion, final boolean visible) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (diagnosticsVersion != providerDiagnosticsVersion || !isUrlEditableProviderSelected()) {
+                    return;
+                }
+                providerDiagnosticsHint.setVisibility(visible ? View.VISIBLE : View.GONE);
+            }
+        });
+    }
+
+    private void checkProviderReachability(final int diagnosticsVersion, final String customUrl, final String apiKey,
+                                           final boolean gatewayOk, final boolean internetOk) {
+        fetchModelsForProvider(customUrl, apiKey, new ApiCallback<ArrayList<String>>() {
+            public void onSuccess(ArrayList<String> result) {
+                boolean providerOk = result != null && !result.isEmpty();
+                postDiagnosticStep(diagnosticsVersion, providerDiagnosticsProvider, R.string.diagnostics_provider_label, providerOk);
+                if (gatewayOk && internetOk && !providerOk) {
+                    postDiagnosticsHint(diagnosticsVersion, true);
+                }
+                finishProviderDiagnostics(diagnosticsVersion, customUrl, providerOk);
+            }
+
+            public void onError(ApiError error) {
+                boolean providerOk = isReachableProviderError(error.getMessage());
+                postDiagnosticStep(diagnosticsVersion, providerDiagnosticsProvider, R.string.diagnostics_provider_label, providerOk);
+                if (gatewayOk && internetOk && !providerOk) {
+                    postDiagnosticsHint(diagnosticsVersion, true);
+                }
+                finishProviderDiagnostics(diagnosticsVersion, customUrl, providerOk);
+            }
+        });
+    }
+
+    private void finishProviderDiagnostics(final int diagnosticsVersion, final String customUrl, final boolean success) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (diagnosticsVersion != providerDiagnosticsVersion || !isUrlEditableProviderSelected()) {
+                    return;
+                }
+                providerCheckRunning = false;
+                checkProviderConnection.setEnabled(true);
+                providerStatus = success ? ConfigManager.PROVIDER_STATUS_OK : ConfigManager.PROVIDER_STATUS_FAILED;
+                providerLastCheckTimestamp = System.currentTimeMillis();
+                persistProviderCheckState(customUrl);
+                updateProviderStatusLabel();
+            }
+        });
+    }
+
+    private String resolveGatewayHost() {
+        try {
+            WifiManager wifiManager = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+            if (wifiManager == null) {
+                return null;
+            }
+            DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
+            if (dhcpInfo == null || dhcpInfo.gateway == 0) {
+                return null;
+            }
+            return intToIp(dhcpInfo.gateway);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String intToIp(int address) {
+        return (address & 0xff) + "."
+                + ((address >> 8) & 0xff) + "."
+                + ((address >> 16) & 0xff) + "."
+                + ((address >> 24) & 0xff);
+    }
+
+    private int resolvePort(Uri uri) {
+        int port = uri.getPort();
+        if (port > 0) {
+            return port;
+        }
+        String scheme = uri.getScheme();
+        if ("https".equalsIgnoreCase(scheme)) {
+            return 443;
+        }
+        return 80;
+    }
+
+    private boolean checkHostReachable(String host, int timeoutMs) {
+        try {
+            InetAddress address = InetAddress.getByName(host);
+            if (address.isReachable(timeoutMs)) {
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+        int[] fallbackPorts = new int[] { 53, 80, 443 };
+        for (int i = 0; i < fallbackPorts.length; i++) {
+            if (checkSocketReachable(host, fallbackPorts[i], timeoutMs)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean checkSocketReachable(String host, int port, int timeoutMs) {
+        Socket socket = null;
+        try {
+            socket = new Socket();
+            socket.connect(new InetSocketAddress(host, port), timeoutMs);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            if (socket != null) {
+                try {
+                    socket.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private boolean checkProviderEndpoint(String customUrl, String apiKey) {
+        HttpURLConnection connection = null;
+        try {
+            URL endpointUrl = new URL(buildModelsEndpoint(customUrl));
+            connection = (HttpURLConnection) endpointUrl.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(3000);
+            connection.setReadTimeout(3000);
+            connection.setRequestProperty("Accept", "application/json");
+            if (apiKey != null && apiKey.length() != 0) {
+                connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+            }
+            int code = connection.getResponseCode();
+            return (code >= 200 && code < 300) || code == 401 || code == 403;
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private String buildModelsEndpoint(String customUrl) {
+        String normalized = normalizeProviderUrl(customUrl);
+        if (normalized.endsWith("/v1")) {
+            return normalized + "/models";
+        }
+        if (normalized.endsWith("/v1beta/openai")) {
+            return normalized + "/models";
+        }
+        return normalized + "/v1/models";
     }
 
     private boolean isReachableProviderError(String errorMessage) {
@@ -614,7 +905,9 @@ public class SettingsActivity extends AppCompatActivity {
         final String apiKey = keyText.getText().toString().trim();
         final boolean languageChanged = !LocaleHelper.normalizeLanguage(config.getAppLanguage()).equals(LocaleHelper.normalizeLanguage(defaultSystemToEmpty(selectedLanguage)));
         final String providerUrl = resolveSelectedProviderUrl(conf.getBaseUrl());
-        final String thinkingModel = selectedThinkingModel != null ? selectedThinkingModel : conf.getThinkingModel();
+        ArrayList<String> cachedProviderModels = config.getCachedModels(providerUrl);
+        final String thinkingModel = resolveSafeThinkingModel(providerUrl, selectedThinkingModel != null ? selectedThinkingModel : resolveProviderThinkingModel(providerUrl, conf.getThinkingModel()), cachedProviderModels);
+        final String providerChatModel = resolveProviderChatModel(providerUrl, providerUrl.equals(conf.getBaseUrl()) ? conf.getChatModel() : "", cachedProviderModels);
 
         config.setAppLanguage(defaultSystemToEmpty(selectedLanguage));
         config.setNickname(nickname.getText().toString().trim());
@@ -628,30 +921,33 @@ public class SettingsActivity extends AppCompatActivity {
         config.setCustomSystemPrompt(customSystemPrompt.getText().toString().trim());
         config.setProviderType(selectedProviderType != null ? selectedProviderType : "");
         config.setProviderUrl(providerUrl);
+        config.setProviderUrlForType(selectedProviderType, providerUrl);
         config.setProviderStatus(providerStatus);
         config.setProviderLastCheckTimestamp(providerLastCheckTimestamp);
+        config.setProviderChatModel(providerUrl, providerChatModel);
+        config.setProviderThinkingModel(providerUrl, thinkingModel);
 
         if (providerUrl.equals(conf.getBaseUrl())) {
-            config.setConfig(new Config(providerUrl, apiKey, conf.getChatModel(), thinkingModel, conf.getShrinkThink(), conf.getSystemPrompt(), conf.getUpdateDelay()));
+            config.setConfig(new Config(providerUrl, apiKey, providerChatModel, thinkingModel, conf.getShrinkThink(), conf.getSystemPrompt(), conf.getUpdateDelay()));
             setResult(languageChanged ? RESULT_OK : RESULT_CANCELED, buildSettingsResult(languageChanged));
             finish();
             return;
         }
 
         final Loading loading = new Loading(context);
-        final String originalBaseUrl = conf.getBaseUrl();
-        config.updateBaseUrl(providerUrl);
-        api.getModels(new ApiCallback<ArrayList<String>>() {
+        fetchModelsForProvider(providerUrl, apiKey, new ApiCallback<ArrayList<String>>() {
             public void onSuccess(ArrayList<String> models) {
-                config.setCachedModels(models);
-                String currentChatModel = conf.getChatModel();
-                if (currentChatModel == null || currentChatModel.length() == 0 || !models.contains(currentChatModel)) {
+                config.setCachedModels(providerUrl, models);
+                String currentChatModel = resolveProviderChatModel(providerUrl, providerChatModel, models);
+                if ((currentChatModel == null || currentChatModel.length() == 0) && !models.isEmpty()) {
                     currentChatModel = ModelSelector.selectChatModel(models);
                 }
                 String currentThinkingModel = thinkingModel;
-                if (currentThinkingModel == null || currentThinkingModel.length() == 0 || !models.contains(currentThinkingModel)) {
+                if ((currentThinkingModel == null || currentThinkingModel.length() == 0 || !models.contains(currentThinkingModel)) && !models.isEmpty()) {
                     currentThinkingModel = ModelSelector.selectThinkingModel(models);
                 }
+                config.setProviderChatModel(providerUrl, currentChatModel);
+                config.setProviderThinkingModel(providerUrl, currentThinkingModel);
                 config.setConfig(new Config(providerUrl, apiKey, currentChatModel, currentThinkingModel, conf.getShrinkThink(), conf.getSystemPrompt(), conf.getUpdateDelay()));
                 loading.dismiss();
                 setResult(languageChanged ? RESULT_OK : RESULT_CANCELED, buildSettingsResult(languageChanged));
@@ -660,8 +956,12 @@ public class SettingsActivity extends AppCompatActivity {
 
             public void onError(ApiError error) {
                 loading.dismiss();
-                config.updateBaseUrl(originalBaseUrl);
+                String fallbackChatModel = resolveProviderChatModel(providerUrl, providerChatModel, config.getCachedModels(providerUrl));
+                String fallbackThinkingModel = resolveProviderThinkingModel(providerUrl, thinkingModel);
+                config.setConfig(new Config(providerUrl, apiKey, fallbackChatModel, fallbackThinkingModel, conf.getShrinkThink(), conf.getSystemPrompt(), conf.getUpdateDelay()));
                 Toast.makeText(context, error.getMessage(), Toast.LENGTH_LONG).show();
+                setResult(languageChanged ? RESULT_OK : RESULT_CANCELED, buildSettingsResult(languageChanged));
+                finish();
             }
         });
     }
@@ -743,7 +1043,9 @@ public class SettingsActivity extends AppCompatActivity {
     private String resolveProviderSelectionLabel() {
         return isCustomProviderSelected()
                 ? getString(R.string.custom_provider)
-                : resolveProviderLabel(selectedProviderUrl);
+                : (selectedProviderType != null && selectedProviderType.length() != 0
+                ? selectedProviderType
+                : resolveProviderLabel(selectedProviderUrl));
     }
 
     private String normalizeProviderUrl(String url) {
@@ -751,11 +1053,25 @@ public class SettingsActivity extends AppCompatActivity {
         if (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
+        if (("LM Studio".equals(selectedProviderType) || "Ollama".equals(selectedProviderType)) && normalized.length() != 0) {
+            String lower = normalized.toLowerCase(Locale.US);
+            if (lower.endsWith("/chat/completions")) {
+                normalized = normalized.substring(0, normalized.length() - "/chat/completions".length());
+                lower = normalized.toLowerCase(Locale.US);
+            }
+            if (lower.endsWith("/models")) {
+                normalized = normalized.substring(0, normalized.length() - "/models".length());
+                lower = normalized.toLowerCase(Locale.US);
+            }
+            if (!lower.endsWith("/v1")) {
+                normalized = normalized + "/v1";
+            }
+        }
         return normalized;
     }
 
     private String resolveSelectedProviderUrl(String fallbackUrl) {
-        if (isCustomProviderSelected()) {
+        if (isUrlEditableProviderSelected()) {
             String typedUrl = normalizeProviderUrl(customProviderUrl.getText().toString());
             return typedUrl.length() != 0 ? typedUrl : fallbackUrl;
         }
@@ -763,6 +1079,59 @@ public class SettingsActivity extends AppCompatActivity {
             return ApiManager.getUrlByName(selectedProviderType);
         }
         return selectedProviderUrl != null ? selectedProviderUrl : fallbackUrl;
+    }
+
+    private String resolveProviderUrlForSelection() {
+        return resolveSelectedProviderUrl(config.getConfig().getBaseUrl());
+    }
+
+    private String resolveProviderThinkingModel(String providerUrl, String fallback) {
+        String model = config.getProviderThinkingModel(providerUrl);
+        if (model == null || model.length() == 0) {
+            model = fallback;
+        }
+        return model != null ? model : "";
+    }
+
+    private String resolveSafeThinkingModel(String providerUrl, String candidate, List<String> availableModels) {
+        String model = candidate;
+        if (model == null || model.length() == 0) {
+            model = resolveProviderThinkingModel(providerUrl, "");
+        }
+        if (availableModels != null && !availableModels.isEmpty() && (model == null || model.length() == 0 || !availableModels.contains(model))) {
+            model = ModelSelector.selectThinkingModel(availableModels);
+        }
+        return model != null ? model : "";
+    }
+
+    private String resolveProviderChatModel(String providerUrl, String fallback, List<String> availableModels) {
+        String model = config.getProviderChatModel(providerUrl);
+        if (model == null || model.length() == 0) {
+            model = fallback;
+        }
+        if (availableModels != null && !availableModels.isEmpty() && (model == null || model.length() == 0 || !availableModels.contains(model))) {
+            model = ModelSelector.selectChatModel(availableModels);
+        }
+        return model != null ? model : "";
+    }
+
+    private void fetchModelsForProvider(String providerUrl, String apiKey, final ApiCallback<ArrayList<String>> callback) {
+        final Config conf = config.getConfig();
+        final String originalBaseUrl = conf.getBaseUrl();
+        final String originalApiKey = conf.getApiKey();
+        conf.setBaseUrl(providerUrl);
+        conf.setApiKey(apiKey);
+        api.getModels(new ApiCallback<ArrayList<String>>() {
+            public void onSuccess(ArrayList<String> result) {
+                restoreProviderCheckConfig(originalBaseUrl, originalApiKey);
+                callback.onSuccess(result != null ? result : new ArrayList<String>());
+            }
+
+            public void onError(ApiError error) {
+                restoreProviderCheckConfig(originalBaseUrl, originalApiKey);
+                callback.onError(error);
+            }
+        });
     }
 
     private Intent buildSettingsResult(boolean languageChanged) {

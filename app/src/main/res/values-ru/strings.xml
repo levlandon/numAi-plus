@@ -89,4 +89,19 @@
     <string name="error_details_provider">Провайдер: %1$s</string>
     <string name="error_details_model">Модель: %1$s</string>
     <string name="not_available_short">н/д</string>
+    <string name="diagnostics_gateway_label">Шлюз доступен</string>
+    <string name="diagnostics_local_label">Локальная сеть доступна</string>
+    <string name="diagnostics_internet_label">Интернет доступен</string>
+    <string name="diagnostics_provider_label">Провайдер доступен</string>
+    <string name="diagnostics_status_pending">…</string>
+    <string name="diagnostics_status_success">✔</string>
+    <string name="diagnostics_status_failed">✖</string>
+    <string name="diagnostics_gateway_pending">Шлюз доступен	…</string>
+    <string name="diagnostics_local_pending">Локальная сеть доступна	…</string>
+    <string name="diagnostics_internet_pending">Интернет доступен	…</string>
+    <string name="diagnostics_provider_pending">Провайдер доступен	…</string>
+    <string name="diagnostics_router_hint">Локальный провайдер может блокироваться из-за router isolation (AP isolation)\nПопробуйте hotspot или отключите isolation в настройках роутера</string>
+    <string name="no_models_available">Для этого провайдера нет доступных моделей</string>
+    <string name="unexpected_models_format">Провайдер вернул неожиданный список моделей</string>
+    <string name="attachments_not_supported">Текущая модель или провайдер не поддерживает изображения. Переключитесь на vision-модель или уберите вложения.</string>
 </resources>

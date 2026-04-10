@@ -34,7 +34,9 @@ class ApiService {
             @Override
             public void run() {
                 try {
-                    ApiRequest request = new ApiRequest("/chat/completions?include_think=true", "POST");
+                    String providerType = config.getProviderType();
+                    boolean isLmStudio = "LM Studio".equals(providerType);
+                    ApiRequest request = new ApiRequest(isLmStudio ? "/chat/completions" : "/chat/completions?include_think=true", "POST");
                     JSONArray messages = new JSONArray();
                     String systemStr = SystemPromptBuilder.build(config);
                     if (systemStr.length() != 0) {
@@ -75,7 +77,7 @@ class ApiService {
                     body.put("model", model);
                     body.put("messages", messages);
                     body.put("stream", true);
-                    if (thinking) {
+                    if (thinking && !isLmStudio) {
                         //apparently the OpenAI Chat Completions API format still doesn't have proper reasoning support.
                         // I would've used Responses API if possible, but very few platforms support it.
                         // Flags are different on each API so this needs to be constantly changed in the future...
@@ -111,6 +113,8 @@ class ApiService {
                     }
                 } catch (ApiError e) {
                     deliverError(callback, e);
+                } catch (Exception e) {
+                    deliverError(callback, new ApiError(ctx.getString(R.string.request_failed) + ": " + e.getMessage()));
                 }
             }
         }).start();
@@ -123,28 +127,89 @@ class ApiService {
                 try {
                     ApiRequest request = new ApiRequest("/models", "GET");
                     String response = apiClient.executeAsString(request);
-                    ArrayList<String> models = new ArrayList<>();
-
-                    JSONObject resp = JSON.getObject(response);
-                    if (resp.has("error"))
-                        deliverError(callback, new ApiError(resp.getObject("error").getString("message")));
-                    else {
-                        JSONArray json = resp.getArray("data");
-                        for (int i = 0; i < json.size(); i++) {
-                            JSONObject model = json.getObject(i);
-                            if (model.has("endpoints")) {
-                                if (model.getArray("endpoints").has("/v1/chat/completions"))
-                                    models.add(json.getObject(i).getString("id"));
-                            } else
-                                models.add(json.getObject(i).getString("id"));
-                        }
+                    ArrayList<String> models = parseModelsResponse(response);
+                    if (models.isEmpty()) {
+                        deliverError(callback, new ApiError(ctx.getString(R.string.no_models_available)));
+                    } else {
                         deliverSuccess(callback, models);
                     }
                 } catch (ApiError e) {
                     deliverError(callback, e);
+                } catch (Exception e) {
+                    deliverError(callback, new ApiError(ctx.getString(R.string.unexpected_models_format)));
                 }
             }
         }).start();
+    }
+
+    private ArrayList<String> parseModelsResponse(String response) throws ApiError {
+        ArrayList<String> models = new ArrayList<String>();
+        if (response == null || response.trim().length() == 0) {
+            return models;
+        }
+        try {
+            JSONObject resp = JSON.getObject(response);
+            if (resp.has("error")) {
+                try {
+                    deliverModelError(resp.getObject("error"));
+                } catch (Exception ignored) {
+                    throw new ApiError(ctx.getString(R.string.request_failed));
+                }
+            }
+            JSONArray json = resp.has("data") ? resp.getArray("data") : null;
+            if (json != null) {
+                appendModelsFromArray(models, json);
+                return models;
+            }
+        } catch (ApiError e) {
+            throw e;
+        } catch (Exception ignored) {
+        }
+        try {
+            JSONArray json = JSON.getArray(response);
+            appendModelsFromArray(models, json);
+            return models;
+        } catch (Exception ignored) {
+        }
+        return models;
+    }
+
+    private void appendModelsFromArray(ArrayList<String> models, JSONArray json) {
+        if (json == null) {
+            return;
+        }
+        for (int i = 0; i < json.size(); i++) {
+            try {
+                JSONObject model = json.getObject(i);
+                String id = model.getString("id");
+                if (id == null || id.length() == 0) {
+                    continue;
+                }
+                if (model.has("endpoints")) {
+                    if (model.getArray("endpoints").has("/v1/chat/completions")) {
+                        models.add(id);
+                    }
+                } else {
+                    models.add(id);
+                }
+            } catch (Exception ignored) {
+                try {
+                    String value = json.getString(i);
+                    if (value != null && value.length() != 0) {
+                        models.add(value);
+                    }
+                } catch (Exception ignoredAgain) {
+                }
+            }
+        }
+    }
+
+    private void deliverModelError(JSONObject errorObject) throws ApiError {
+        try {
+            throw new ApiError(errorObject.getString("message"));
+        } catch (Exception ignored) {
+            throw new ApiError(ctx.getString(R.string.request_failed));
+        }
     }
 
     private <T> void deliverSuccess(final ApiCallback<T> callback, final T result) {
