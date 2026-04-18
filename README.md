@@ -1,3 +1,5 @@
+<img src="img/logo.png" width="100"/>
+
 # NumAI Plus
 
 **English** / [Русский](README.ru.md)
