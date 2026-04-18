@@ -1,4 +1,5 @@
 # NumAI Plus
+
 **English** / [Русский](README.ru.md)
 
 NumAI Plus is a modern fork of [NumAI](https://github.com/gohoski/numAi).
@@ -7,11 +8,12 @@ This fork takes a different direction: a richer client, a cleaner UI, multi-chat
 
 NumAI Plus is focused on **Android 4.0+**.
 
-![NumAI Plus](img/logo.png "Modern LLM client for older Android devices")
+
 
 ![Screenshot](img/scr1.png) ![Screenshot](img/scr2.png) ![Screenshot](img/scr3.png)
 
 ## What NumAI Plus Changes
+
 - Modernized client based on NumAI
 - Chat list with local history, search, rename, and delete
 - Bubble-style controls and improved chat layout
@@ -21,6 +23,7 @@ NumAI Plus is focused on **Android 4.0+**.
 - Separate chat and thinking model configuration
 
 ## Features
+
 - Works with many **OpenAI-compatible APIs**
 - Built-in provider presets: `VoidAI`, `Ollama`, `NavyAI`, `OpenRouter`, `Baseten`, `Gemini`, `Together`, `Upstage`, `LM Studio`
 - Custom provider URL support
@@ -36,6 +39,7 @@ NumAI Plus is focused on **Android 4.0+**.
 - Provider diagnostics and connection checks
 
 ## Quick Start
+
 1. Install APK from [Releases](https://github.com/levlandon/numAi-plus/releases).
 2. Open **Settings**.
 3. Choose a provider or enter a custom OpenAI-compatible endpoint.
@@ -44,12 +48,14 @@ NumAI Plus is focused on **Android 4.0+**.
 6. Start chatting.
 
 ## Recommended Use Cases
+
 - Old phones and tablets that are too weak for modern heavy clients
 - Local LLM access through `Ollama` or `LM Studio`
 - Cloud LLM access through OpenAI-compatible providers
 - Personal AI setup with profile-based behavior tuning
 
 ## Compatibility
+
 - Upstream NumAI aims at Android `1.0+`
 - NumAI Plus is focused on **Android 4.0+**
 - Main target: old devices that still need a more modern UX than the upstream app
@@ -58,24 +64,29 @@ If you need maximum historical compatibility, check the original [NumAI reposito
 If you want chats, better controls, and personalization, use NumAI Plus.
 
 ## Build
+
 Project uses the classic Android/Gradle app structure.
 
 Build options:
+
 - Android Studio
 - `gradlew.bat assembleDebug`
 - `gradlew.bat assembleRelease`
 
 ## Roadmap Direction
+
 - Better multi-chat UX
 - More provider presets
 - More polish for old Android layouts
 - Continued modernization without turning the app into a heavy client
 
 ## Bugs and Feedback
+
 - Issues: [github.com/levlandon/numAi-plus/issues](https://github.com/levlandon/numAi-plus/issues)
 - Upstream project: [github.com/gohoski/numAi](https://github.com/gohoski/numAi)
 
 When reporting bugs, include:
+
 - Android version
 - Device model
 - Provider name
@@ -83,11 +94,14 @@ When reporting bugs, include:
 - Whether streaming was enabled
 
 ## Credits
+
 - Original project: [gohoski/numAi](https://github.com/gohoski/numAi)
 - NNJSON: [shinovon/NNJSON](https://github.com/shinovon/NNJSON)
 - This fork keeps building on the original legacy-focused idea, but moves the client toward a more modern experience
 
 ## License
+
 The project inherits the original licensing structure:
+
 - main project: [WTFPL v2](LICENSE)
 - NNJSON: [MIT](LICENSE-NNJSON)
