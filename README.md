@@ -15,6 +15,9 @@ NumAI Plus is focused on **Android 4.0+**.
 Telegram (RU): https://t.me/lev_landon
 Twitter / X (EN): https://x.com/lev_landon
 
+## Download
+
+[numAI-Plus-0.2.0-release.apk](https://github.com/levlandon/numAi-plus/releases/download/V0.2.0/numAI-Plus-0.2.0-release.apk)
 
 
 ## Screenshots
