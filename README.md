@@ -115,7 +115,8 @@ When reporting bugs, include:
 
 ## License
 
-The project inherits the original licensing structure:
+This project inherits its licensing structure from the original NumAI project.
 
-- main project: [WTFPL v2](LICENSE)
-- NNJSON: [MIT](LICENSE-NNJSON)
+- Original inherited code: WTFPL v2 ([LICENSE](LICENSE))
+- New modifications and additions in this fork: MIT License (Copyright © 2026 Lev Landon)
+- NNJSON library: MIT License ([LICENSE-NNJSON](LICENSE-NNJSON))
