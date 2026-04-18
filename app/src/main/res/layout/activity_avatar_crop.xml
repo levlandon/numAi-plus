@@ -42,7 +42,7 @@
         android:layout_height="fill_parent"
         android:layout_below="@id/crop_header">
 
-        <io.github.gohoski.numai.AvatarCropImageView
+        <io.github.levlandon.numai_plus.AvatarCropImageView
             android:id="@+id/crop_preview"
             android:layout_width="fill_parent"
             android:layout_height="fill_parent"

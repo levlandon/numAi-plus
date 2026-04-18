@@ -1,37 +1,45 @@
 apply plugin: 'com.android.application'
 
 android {
+
+    compileSdkVersion 25
+    buildToolsVersion "25.0.0"
+
     signingConfigs {
         config {
-            keyAlias 'numai_plus'
-            keyPassword 'numai_plus'
+            storeFile file("F:/numai_plus.jks")
+            storePassword "numai_plus"
+            keyAlias "numai_plus"
+            keyPassword "numai_plus"
         }
     }
+
     lintOptions {
         checkReleaseBuilds false
         abortOnError false
     }
-}
-    compileSdkVersion 25
-    buildToolsVersion "25.0.0"
+
     defaultConfig {
         applicationId "io.github.levlandon.numai_plus"
         minSdkVersion 16
-        //noinspection OldTargetApi
         targetSdkVersion 25
         versionCode 2
         versionName "0.2.0"
-        setProperty("archivesBaseName", "numAI-Plus-$versionName") //e.g. numAI-Plus-0.1.0-release.apk
+
+        setProperty(
+                "archivesBaseName",
+                "numAI-Plus-$versionName"
+        )
     }
+
     buildTypes {
         release {
-            //Optimizations totally work down to API 1 and result in smaller file size.
-            shrinkResources true //reduces apk size removing unused code
-            minifyEnabled true //increase performance optimizing dex files (obfuscation)
+            signingConfig signingConfigs.config
+            shrinkResources true
+            minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
-
 }
 
 dependencies {
