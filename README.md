@@ -9,8 +9,11 @@ This fork takes a different direction: a richer client, a cleaner UI, multi-chat
 NumAI Plus is focused on **Android 4.0+**.
 
 
+## Screenshots
 
-![Screenshot](img/scr1.png) ![Screenshot](img/scr2.png) ![Screenshot](img/scr3.png)
+<img src="img/scr1.jpg" width="300"/>
+<img src="img/scr2.jpg" width="300"/>
+<img src="img/scr3.jpg" width="300"/>
 
 ## What NumAI Plus Changes
 

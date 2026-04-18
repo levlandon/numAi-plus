@@ -9,8 +9,11 @@ NumAI Plus — современный форк [NumAI](https://github.com/gohosk
 NumAI Plus ориентирован на **Android 4.0+**.
 
 
+## Скриншоты
 
-![Скриншот](img/scr1.png) ![Скриншот](img/scr2.png) ![Скриншот](img/scr3.png)
+<img src="img/scr1.jpg" width="300"/>
+<img src="img/scr2.jpg" width="300"/>
+<img src="img/scr3.jpg" width="300"/>
 
 ## Что Меняет NumAI Plus
 
