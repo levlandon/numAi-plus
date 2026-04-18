@@ -112,7 +112,8 @@ Twitter / X (EN): https://x.com/lev_landon
 
 ## Лицензия
 
-Проект наследует схему лицензирования оригинала:
+NumAI Plus основан на оригинальном проекте NumAI и сохраняет его структуру лицензирования.
 
-- основной проект: [WTFPL v2](LICENSE)
-- NNJSON: [MIT](LICENSE-NNJSON)
+- Унаследованный исходный код NumAI: WTFPL v2 ([LICENSE](LICENSE))
+- Изменения и дополнения в этом форке: лицензия MIT (Copyright © 2026 Lev Landon)
+- Библиотека NNJSON: лицензия MIT ([LICENSE-NNJSON](LICENSE-NNJSON))
