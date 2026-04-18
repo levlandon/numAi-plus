@@ -42,11 +42,19 @@ class ConfigManager {
         KEY_PROVIDER_THINKING_MODEL_PREFIX = "provider_thinking_model",
         KEY_PROVIDER_SHOW_ALL_MODELS_PREFIX = "provider_show_all_models",
         KEY_PROVIDER_SELECTED_MODELS_PREFIX = "provider_selected_models",
-        KEY_PROVIDER_CACHED_MODELS_PREFIX = "provider_cached_models";
+        KEY_PROVIDER_CACHED_MODELS_PREFIX = "provider_cached_models",
+        KEY_PROVIDER_STREAMING_MODE_PREFIX = "provider_streaming_mode",
+        KEY_PROVIDER_STREAM_SUPPORTED_PREFIX = "provider_stream_supported";
 
     static final String PROVIDER_STATUS_UNKNOWN = "UNKNOWN";
     static final String PROVIDER_STATUS_OK = "OK";
     static final String PROVIDER_STATUS_FAILED = "FAILED";
+    static final String STREAMING_MODE_AUTO = "AUTO";
+    static final String STREAMING_MODE_ON = "ON";
+    static final String STREAMING_MODE_OFF = "OFF";
+    static final String STREAM_SUPPORT_UNKNOWN = "UNKNOWN";
+    static final String STREAM_SUPPORT_TRUE = "TRUE";
+    static final String STREAM_SUPPORT_FALSE = "FALSE";
 
     private static ConfigManager instance;
     private final SharedPreferences preferences;
@@ -168,6 +176,22 @@ class ConfigManager {
         setCachedModels(config.getBaseUrl(), models);
     }
 
+    String getStreamingMode() {
+        return getProviderStreamingMode(config.getBaseUrl());
+    }
+
+    void setStreamingMode(String mode) {
+        setProviderStreamingMode(config.getBaseUrl(), mode);
+    }
+
+    String getStreamSupport() {
+        return getProviderStreamSupport(config.getBaseUrl());
+    }
+
+    void setStreamSupport(String value) {
+        setProviderStreamSupport(config.getBaseUrl(), value);
+    }
+
     boolean getShowAllModels(String providerUrl) {
         String scopedKey = scopedKey(KEY_PROVIDER_SHOW_ALL_MODELS_PREFIX, providerUrl);
         if (preferences.contains(scopedKey)) {
@@ -224,6 +248,38 @@ class ConfigManager {
             editor.putString(KEY_CACHED_MODELS, joined);
         }
         editor.commit();
+    }
+
+    String getProviderStreamingMode(String providerUrl) {
+        String scoped = preferences.getString(scopedKey(KEY_PROVIDER_STREAMING_MODE_PREFIX, providerUrl), null);
+        if (STREAMING_MODE_ON.equals(scoped) || STREAMING_MODE_OFF.equals(scoped) || STREAMING_MODE_AUTO.equals(scoped)) {
+            return scoped;
+        }
+        return STREAMING_MODE_AUTO;
+    }
+
+    void setProviderStreamingMode(String providerUrl, String mode) {
+        String safeMode = STREAMING_MODE_AUTO;
+        if (STREAMING_MODE_ON.equals(mode) || STREAMING_MODE_OFF.equals(mode)) {
+            safeMode = mode;
+        }
+        preferences.edit().putString(scopedKey(KEY_PROVIDER_STREAMING_MODE_PREFIX, providerUrl), safeMode).commit();
+    }
+
+    String getProviderStreamSupport(String providerUrl) {
+        String scoped = preferences.getString(scopedKey(KEY_PROVIDER_STREAM_SUPPORTED_PREFIX, providerUrl), null);
+        if (STREAM_SUPPORT_TRUE.equals(scoped) || STREAM_SUPPORT_FALSE.equals(scoped)) {
+            return scoped;
+        }
+        return STREAM_SUPPORT_UNKNOWN;
+    }
+
+    void setProviderStreamSupport(String providerUrl, String value) {
+        String safeValue = STREAM_SUPPORT_UNKNOWN;
+        if (STREAM_SUPPORT_TRUE.equals(value) || STREAM_SUPPORT_FALSE.equals(value)) {
+            safeValue = value;
+        }
+        preferences.edit().putString(scopedKey(KEY_PROVIDER_STREAM_SUPPORTED_PREFIX, providerUrl), safeValue).commit();
     }
 
     String getProviderChatModel(String providerUrl) {

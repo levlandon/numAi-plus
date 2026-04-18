@@ -1,5 +1,6 @@
 package io.github.gohoski.numai;
 
+import android.app.Dialog;
 import android.content.Context;
 import android.content.Intent;
 import android.net.DhcpInfo;
@@ -44,6 +45,7 @@ public class SettingsActivity extends AppCompatActivity {
     private static final String OPTION_SYSTEM = "__system__";
     private static final String OPTION_CUSTOM_PROVIDER = "__custom_provider__";
     private static final String PROVIDER_LM_STUDIO = "LM Studio";
+    private static final String ABOUT_GITHUB_URL = "https://github.com/levlandon/numAi-plus";
 
     private static final String OPTION_DEFAULT = "__default__";
 
@@ -62,14 +64,13 @@ public class SettingsActivity extends AppCompatActivity {
 
     private View sectionProfile;
     private View sectionPersonalization;
-    private View sectionModels;
     private View sectionProvider;
     private Button tabProfile;
     private Button tabPersonalization;
-    private Button tabModels;
     private Button tabProvider;
 
     private SelectorRow providerSelector;
+    private SelectorRow streamingModeSelector;
     private SelectorRow thinkingModelSelector;
     private SelectorRow responseStyleSelector;
     private SelectorRow responseDetailSelector;
@@ -97,6 +98,7 @@ public class SettingsActivity extends AppCompatActivity {
     private String pendingAvatarPath;
     private String selectedProviderUrl;
     private String selectedProviderType;
+    private String selectedStreamingMode;
     private String selectedThinkingModel;
     private String selectedResponseStyle;
     private String selectedResponseDetailLevel;
@@ -173,15 +175,14 @@ public class SettingsActivity extends AppCompatActivity {
 
         sectionProfile = findViewById(R.id.section_profile);
         sectionPersonalization = findViewById(R.id.section_personalization);
-        sectionModels = findViewById(R.id.section_models);
         sectionProvider = findViewById(R.id.section_provider);
 
         tabProfile = (Button) findViewById(R.id.tab_profile);
         tabPersonalization = (Button) findViewById(R.id.tab_personalization);
-        tabModels = (Button) findViewById(R.id.tab_models);
         tabProvider = (Button) findViewById(R.id.tab_provider);
 
         providerSelector = new SelectorRow(findViewById(R.id.provider_selector));
+        streamingModeSelector = new SelectorRow(findViewById(R.id.streaming_mode_selector));
         thinkingModelSelector = new SelectorRow(findViewById(R.id.thinking_model_selector));
         responseStyleSelector = new SelectorRow(findViewById(R.id.response_style_selector));
         responseDetailSelector = new SelectorRow(findViewById(R.id.response_detail_selector));
@@ -192,8 +193,7 @@ public class SettingsActivity extends AppCompatActivity {
     private void setupTabs() {
         tabProfile.setOnClickListener(new SectionClickListener(0));
         tabPersonalization.setOnClickListener(new SectionClickListener(1));
-        tabModels.setOnClickListener(new SectionClickListener(2));
-        tabProvider.setOnClickListener(new SectionClickListener(3));
+        tabProvider.setOnClickListener(new SectionClickListener(2));
         findViewById(R.id.back_button).setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) {
                 finish();
@@ -207,6 +207,18 @@ public class SettingsActivity extends AppCompatActivity {
         providerSelector.root.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) {
                 showProviderSelector();
+            }
+        });
+
+        streamingModeSelector.setTitle(getString(R.string.streaming_mode));
+        streamingModeSelector.root.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                showSingleOptionSelector(streamingModeSelector.root, buildStreamingModeOptions(), selectedStreamingMode, new OptionSelectionListener() {
+                    public void onSelected(SelectionOption option) {
+                        selectedStreamingMode = option.value;
+                        streamingModeSelector.setValue(option.label);
+                    }
+                });
             }
         });
 
@@ -277,6 +289,11 @@ public class SettingsActivity extends AppCompatActivity {
                 saveSettings();
             }
         });
+        findViewById(R.id.about_button).setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                showAboutDialog();
+            }
+        });
         findViewById(R.id.from_file).setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) {
                 Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
@@ -319,6 +336,33 @@ public class SettingsActivity extends AppCompatActivity {
         });
     }
 
+    private void showAboutDialog() {
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.setContentView(R.layout.dialog_about);
+        View back = dialog.findViewById(R.id.about_back);
+        View github = dialog.findViewById(R.id.about_github_button);
+        back.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                dialog.dismiss();
+            }
+        });
+        github.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View view) {
+                openGithubRepository();
+            }
+        });
+        dialog.show();
+    }
+
+    private void openGithubRepository() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(ABOUT_GITHUB_URL));
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, R.string.about_open_github_failed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void loadFormState() {
         Config conf = config.getConfig();
         keyText.setText(conf.getApiKey());
@@ -335,6 +379,7 @@ public class SettingsActivity extends AppCompatActivity {
             selectedProviderType = storedProviderType;
         }
         selectedProviderUrl = config.getProviderUrlForType(selectedProviderType, selectedProviderUrl);
+        selectedStreamingMode = config.getProviderStreamingMode(selectedProviderUrl);
         selectedThinkingModel = resolveProviderThinkingModel(selectedProviderUrl, conf.getThinkingModel());
         selectedResponseStyle = emptyToDefault(config.getResponseStyle());
         selectedResponseDetailLevel = emptyToDefault(config.getResponseDetailLevel());
@@ -344,6 +389,7 @@ public class SettingsActivity extends AppCompatActivity {
         providerLastCheckTimestamp = config.getProviderLastCheckTimestamp();
 
         providerSelector.setValue(resolveProviderSelectionLabel());
+        streamingModeSelector.setValue(findOptionLabel(buildStreamingModeOptions(), selectedStreamingMode));
         thinkingModelSelector.setValue(selectedThinkingModel != null && selectedThinkingModel.length() != 0
                 ? selectedThinkingModel
                 : getString(R.string.select_model));
@@ -363,13 +409,11 @@ public class SettingsActivity extends AppCompatActivity {
     private void selectSection(int section) {
         sectionProfile.setVisibility(section == 0 ? View.VISIBLE : View.GONE);
         sectionPersonalization.setVisibility(section == 1 ? View.VISIBLE : View.GONE);
-        sectionModels.setVisibility(section == 2 ? View.VISIBLE : View.GONE);
-        sectionProvider.setVisibility(section == 3 ? View.VISIBLE : View.GONE);
+        sectionProvider.setVisibility(section == 2 ? View.VISIBLE : View.GONE);
 
         updateTab(tabProfile, section == 0);
         updateTab(tabPersonalization, section == 1);
-        updateTab(tabModels, section == 2);
-        updateTab(tabProvider, section == 3);
+        updateTab(tabProvider, section == 2);
     }
 
     private void updateTab(Button button, boolean selected) {
@@ -399,8 +443,10 @@ public class SettingsActivity extends AppCompatActivity {
                     selectedProviderUrl = ApiManager.getUrlByName(option.value);
                     providerStatus = ConfigManager.PROVIDER_STATUS_UNKNOWN;
                 }
+                selectedStreamingMode = config.getProviderStreamingMode(selectedProviderUrl);
                 selectedThinkingModel = config.getProviderThinkingModel(selectedProviderUrl);
                 providerSelector.setValue(option.label);
+                streamingModeSelector.setValue(findOptionLabel(buildStreamingModeOptions(), selectedStreamingMode));
                 updateCustomProviderUi();
                 applyCachedThinkingModels();
                 updateSelectedModelsSummary();
@@ -613,11 +659,6 @@ public class SettingsActivity extends AppCompatActivity {
         checkProviderConnection.setEnabled(false);
         providerStatusLabel.setText(R.string.checking_connection);
         final String candidateApiKey = keyText.getText().toString().trim();
-        final Config currentConfig = config.getConfig();
-        final String originalBaseUrl = currentConfig.getBaseUrl();
-        final String originalApiKey = currentConfig.getApiKey();
-        currentConfig.setBaseUrl(customUrl);
-        currentConfig.setApiKey(candidateApiKey);
         showDiagnosticsPending();
         new Thread(new Runnable() {
             public void run() {
@@ -922,6 +963,7 @@ public class SettingsActivity extends AppCompatActivity {
         config.setProviderType(selectedProviderType != null ? selectedProviderType : "");
         config.setProviderUrl(providerUrl);
         config.setProviderUrlForType(selectedProviderType, providerUrl);
+        config.setProviderStreamingMode(providerUrl, selectedStreamingMode);
         config.setProviderStatus(providerStatus);
         config.setProviderLastCheckTimestamp(providerLastCheckTimestamp);
         config.setProviderChatModel(providerUrl, providerChatModel);
@@ -973,6 +1015,14 @@ public class SettingsActivity extends AppCompatActivity {
         options.add(new SelectionOption(getString(R.string.option_conversational), "conversational"));
         options.add(new SelectionOption(getString(R.string.option_technical), "technical"));
         options.add(new SelectionOption(getString(R.string.option_detailed), "detailed"));
+        return options;
+    }
+
+    private ArrayList<SelectionOption> buildStreamingModeOptions() {
+        ArrayList<SelectionOption> options = new ArrayList<SelectionOption>();
+        options.add(new SelectionOption(getString(R.string.streaming_mode_auto), ConfigManager.STREAMING_MODE_AUTO));
+        options.add(new SelectionOption(getString(R.string.streaming_mode_on), ConfigManager.STREAMING_MODE_ON));
+        options.add(new SelectionOption(getString(R.string.streaming_mode_off), ConfigManager.STREAMING_MODE_OFF));
         return options;
     }
 

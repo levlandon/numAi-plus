@@ -231,6 +231,7 @@ class ChatRepository {
         message.setTimestamp(timestamp);
         message.setAttachments(attachments);
         message.setReasoningUsed(reasoningUsed);
+        message.setContentFinal(safe(content));
         return message;
     }
 
@@ -312,6 +313,7 @@ class ChatRepository {
         message.setTimestamp(cursor.getLong(cursor.getColumnIndex("timestamp")));
         message.setAttachments(parseAttachments(cursor.getString(cursor.getColumnIndex("attachments_json"))));
         message.setReasoningUsed(cursor.getInt(cursor.getColumnIndex("reasoning_used")) == 1);
+        message.setContentFinal(message.getContent());
         return message;
     }
 

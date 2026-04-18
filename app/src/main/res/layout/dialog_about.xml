@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="fill_parent"
+    android:layout_height="fill_parent"
+    android:background="@color/background"
+    android:padding="16dp">
+
+    <android.support.v7.widget.AppCompatImageButton
+        android:id="@+id/about_back"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_alignParentLeft="true"
+        android:background="@drawable/bg_icon_button"
+        android:contentDescription="@string/back"
+        android:padding="10dp"
+        android:src="@drawable/ic_arrow_back_light" />
+
+    <ScrollView
+        android:layout_width="fill_parent"
+        android:layout_height="fill_parent"
+        android:layout_below="@id/about_back"
+        android:layout_marginTop="16dp"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="fill_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingTop="24dp"
+            android:paddingBottom="24dp">
+
+            <TextView
+                style="@style/AppScreenTitle"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="@string/app_name" />
+
+            <TextView
+                style="@style/AppMetaText"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:text="@string/about_version" />
+
+            <TextView
+                style="@style/AppBodyText"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:gravity="center"
+                android:text="@string/about_tagline" />
+
+            <TextView
+                style="@style/AppSectionTitle"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:gravity="center"
+                android:text="@string/about_developer_label" />
+
+            <TextView
+                style="@style/AppBodyText"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:text="@string/about_developer_name"
+                android:textStyle="bold" />
+
+            <TextView
+                style="@style/AppSectionTitle"
+                android:layout_width="fill_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="28dp"
+                android:gravity="center"
+                android:text="@string/about_github_label" />
+
+            <android.support.v7.widget.AppCompatImageButton
+                android:id="@+id/about_github_button"
+                style="@style/AppIconButton"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginTop="12dp"
+                android:contentDescription="@string/about_open_github"
+                android:padding="14dp"
+                android:src="@drawable/ic_github" />
+        </LinearLayout>
+    </ScrollView>
+</RelativeLayout>

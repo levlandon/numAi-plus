@@ -12,10 +12,12 @@ import java.io.InputStream;
 class ApiResult {
     private final String model;
     private final InputStream result;
+    private final boolean streaming;
 
-    ApiResult(String model, InputStream result) {
+    ApiResult(String model, InputStream result, boolean streaming) {
         this.model = model;
         this.result = result;
+        this.streaming = streaming;
     }
 
     String getModel() {
@@ -24,5 +26,9 @@ class ApiResult {
 
     InputStream getResult() {
         return result;
+    }
+
+    boolean isStreaming() {
+        return streaming;
     }
 }

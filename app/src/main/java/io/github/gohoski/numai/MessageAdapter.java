@@ -359,11 +359,14 @@ class MessageAdapter extends ArrayAdapter<Message> {
             }
         });
 
-        boolean isSpeaking = message == speakingMessage;
+        final boolean canSpeak = TtsTextSanitizer.hasSpeakableText(message.getContentFinal(), message.getContent());
+        boolean isSpeaking = canSpeak && message == speakingMessage;
         holder.speakButton.setImageResource(isSpeaking ? R.drawable.ic_tts_stop : R.drawable.ic_volume_up);
+        holder.speakButton.setEnabled(canSpeak);
+        holder.speakButton.setAlpha(canSpeak ? 1f : 0.35f);
         holder.speakButton.setOnClickListener(new View.OnClickListener() {
             public void onClick(View view) {
-                if (actionListener != null) {
+                if (actionListener != null && canSpeak) {
                     actionListener.onToggleSpeak(message);
                 }
             }

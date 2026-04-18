@@ -9,10 +9,12 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.text.ClipboardManager;
 import android.text.Editable;
 import android.text.TextWatcher;
@@ -46,6 +48,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.ListPopupWindow;
 import android.support.v7.widget.Toolbar;
 import android.widget.Scroller;
+import android.content.res.Resources;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
@@ -72,6 +75,7 @@ import cc.nnproject.json.JSONObject;
 public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_PICK_IMAGE = 1;
     private static final int REQUEST_CODE_SETTINGS = 2;
+    private static final String TAG = "NumAiTts";
 
     private ApiService apiService;
     private ConfigManager config;
@@ -125,8 +129,12 @@ public class MainActivity extends AppCompatActivity {
     private boolean ttsReady = false;
     private boolean ttsInitializing = false;
     private Message speakingMessage;
+    private String activeTtsUtteranceId;
+    private int nextTtsUtteranceId = 1;
     private Message editingMessage;
     private boolean lastRequestedThinkingEnabled;
+    private boolean currentResponseUsedStreaming;
+    private boolean currentResponseRetriedWithoutStreaming;
 
     @Override
     protected void attachBaseContext(Context newBase) {
@@ -994,6 +1002,7 @@ public class MainActivity extends AppCompatActivity {
         final Message msg = message != null ? message : new Message(Role.ASSISTANT, "", model);
         msg.setLlm(model);
         msg.setReasoningUsed(thinkingEnabled);
+        msg.setContentFinal("");
         chatRepository.updateAssistantMessage(msg);
         if (message == null) {
             activeAssistantMessage = msg;
@@ -1023,6 +1032,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleStreamError(String errorMsg) {
+        if (maybeRetryWithoutStreaming(errorMsg)) {
+            return;
+        }
         List<Message> messages = MessageManager.getInstance().getMessages();
         String failedModel = activeAssistantMessage != null && activeAssistantMessage.getLlm() != null
                 ? activeAssistantMessage.getLlm()
@@ -1050,6 +1062,8 @@ public class MainActivity extends AppCompatActivity {
         cancelResponseLoaderTicker();
         activeAssistantMessage = null;
         activeReasoningStartTime = 0L;
+        currentResponseUsedStreaming = false;
+        currentResponseRetriedWithoutStreaming = false;
         adapter.notifyDataSetChanged();
         autoScroll = true;
         scrollToBottom();
@@ -1062,6 +1076,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void requestAssistantResponse(final boolean thinkingEnabled, boolean rollbackUserOnStop) {
+        requestAssistantResponse(thinkingEnabled, rollbackUserOnStop, null);
+    }
+
+    private void requestAssistantResponse(final boolean thinkingEnabled, boolean rollbackUserOnStop, Boolean streamOverride) {
         if (!hasValidChatConfig()) {
             updateComposerState();
             return;
@@ -1103,12 +1121,15 @@ public class MainActivity extends AppCompatActivity {
         thinkBuffer.setLength(0);
         contentBuffer.setLength(0);
         isThinkingState = false;
-        apiService.chatCompletion(MessageManager.getInstance().getMessages(), thinkingEnabled, new ApiCallback<ApiResult>() {
+        currentResponseUsedStreaming = false;
+        currentResponseRetriedWithoutStreaming = Boolean.FALSE.equals(streamOverride);
+        apiService.chatCompletion(MessageManager.getInstance().getMessages(), thinkingEnabled, streamOverride, new ApiCallback<ApiResult>() {
             @Override
             public void onSuccess(final ApiResult apiResult) {
                 if (isCancelled)return;
                 runOnUiThread(new Runnable() {
                     public void run() {
+                        currentResponseUsedStreaming = apiResult.isStreaming();
                         startResponseStream(apiResult.getResult(), apiResult.getModel(), thinkingEnabled, pendingAssistant);
                     }
                 });
@@ -1305,6 +1326,7 @@ public class MainActivity extends AppCompatActivity {
         if (ttsInitializing) {
             return false;
         }
+        resetTextToSpeechEngine();
         ttsInitializing = true;
         final Message messageToSpeak = pendingMessage;
         textToSpeech = new TextToSpeech(this, new TextToSpeech.OnInitListener() {
@@ -1312,25 +1334,11 @@ public class MainActivity extends AppCompatActivity {
                 ttsInitializing = false;
                 if (status != TextToSpeech.SUCCESS || textToSpeech == null) {
                     ttsReady = false;
+                    resetTextToSpeechEngine();
                     Toast.makeText(MainActivity.this, R.string.tts_not_available, Toast.LENGTH_SHORT).show();
                     return;
                 }
-                int availability = textToSpeech.setLanguage(Locale.getDefault());
-                if (availability == TextToSpeech.LANG_MISSING_DATA || availability == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    ttsReady = false;
-                    Toast.makeText(MainActivity.this, R.string.tts_not_available, Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                textToSpeech.setOnUtteranceCompletedListener(new TextToSpeech.OnUtteranceCompletedListener() {
-                    public void onUtteranceCompleted(String utteranceId) {
-                        runOnUiThread(new Runnable() {
-                            public void run() {
-                                speakingMessage = null;
-                                adapter.setSpeakingMessage(null);
-                            }
-                        });
-                    }
-                });
+                attachTextToSpeechListener();
                 ttsReady = true;
                 startSpeakingMessage(messageToSpeak);
             }
@@ -1339,27 +1347,563 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startSpeakingMessage(Message message) {
-        if (message == null || message.getContent() == null || message.getContent().trim().length() == 0) {
+        if (message == null) {
             return;
         }
         if (textToSpeech == null || !ttsReady) {
             return;
         }
-        String speakableText = stripEmojiForTts(message.getContent()).trim();
-        if (speakableText.length() == 0) {
+        if (message.isSent()) {
+            Log.d(TAG, "Blocked TTS: message is not an assistant response");
             return;
         }
+        if (message == activeAssistantMessage && isGenerating) {
+            Log.d(TAG, "Blocked TTS: assistant message is still streaming messageId=" + message.getMessageId());
+            return;
+        }
+        String finalContent = message.getContentFinal();
+        String displayContent = message.getContent();
+        String speakableText = TtsTextSanitizer.sanitizeForPlayback(finalContent, displayContent);
+        if (speakableText.length() == 0) {
+            Log.d(TAG, "Blocked TTS: sanitized assistant text is empty messageId=" + message.getMessageId()
+                    + " raw=" + quoteForLog(finalContent)
+                    + " display=" + quoteForLog(displayContent));
+            return;
+        }
+        if (!applyBestAvailableTtsLocale(speakableText)) {
+            Log.d(TAG, "Blocked TTS: no supported locale for messageId=" + message.getMessageId());
+            resetTextToSpeechEngine();
+            Toast.makeText(this, R.string.tts_not_available, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Log.d(TAG, "Preparing TTS from message.contentFinal messageId=" + message.getMessageId()
+                + " text=" + quoteForLog(finalContent));
+        Log.d(TAG, "Calling tts.speak() messageId=" + message.getMessageId()
+                + " text=" + quoteForLog(speakableText));
         if (speakingMessage != null && speakingMessage != message) {
             textToSpeech.stop();
         }
         speakingMessage = message;
         adapter.setSpeakingMessage(message);
         HashMap params = new HashMap();
-        params.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "numai_tts");
-        textToSpeech.speak(speakableText, TextToSpeech.QUEUE_FLUSH, params);
+        String utteranceId = "numai_tts_" + nextTtsUtteranceId++;
+        activeTtsUtteranceId = utteranceId;
+        params.put(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId);
+        int speakStatus = textToSpeech.speak(speakableText, TextToSpeech.QUEUE_FLUSH, params);
+        if (speakStatus == TextToSpeech.ERROR) {
+            Log.d(TAG, "tts.speak() failed messageId=" + message.getMessageId());
+            activeTtsUtteranceId = null;
+            speakingMessage = null;
+            adapter.setSpeakingMessage(null);
+            resetTextToSpeechEngine();
+        }
+    }
+
+    private void attachTextToSpeechListener() {
+        if (textToSpeech == null) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 15) {
+            textToSpeech.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override
+                public void onStart(String utteranceId) {
+                }
+
+                @Override
+                public void onDone(String utteranceId) {
+                    handleTtsPlaybackFinished(utteranceId);
+                }
+
+                @Override
+                public void onError(String utteranceId) {
+                    handleTtsPlaybackFinished(utteranceId);
+                }
+            });
+            return;
+        }
+        textToSpeech.setOnUtteranceCompletedListener(new TextToSpeech.OnUtteranceCompletedListener() {
+            public void onUtteranceCompleted(String utteranceId) {
+                handleTtsPlaybackFinished(utteranceId);
+            }
+        });
+    }
+
+    private void handleTtsPlaybackFinished(final String utteranceId) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                if (utteranceId != null && activeTtsUtteranceId != null && !utteranceId.equals(activeTtsUtteranceId)) {
+                    return;
+                }
+                activeTtsUtteranceId = null;
+                speakingMessage = null;
+                adapter.setSpeakingMessage(null);
+            }
+        });
+    }
+
+    private boolean applyBestAvailableTtsLocale(String sampleText) {
+        if (textToSpeech == null) {
+            return false;
+        }
+        ArrayList<Locale> candidates = new ArrayList<Locale>();
+        addTtsLocaleCandidate(candidates, detectTtsLocale(sampleText));
+        addTtsLocaleCandidate(candidates, resolveConfiguredAppLocale());
+        addTtsLocaleCandidate(candidates, Locale.getDefault());
+        addTtsLocaleCandidate(candidates, Resources.getSystem().getConfiguration().locale);
+        addTtsLocaleCandidate(candidates, Locale.ENGLISH);
+        addTtsLocaleCandidate(candidates, Locale.US);
+        for (int i = 0; i < candidates.size(); i++) {
+            Locale locale = candidates.get(i);
+            int availability = textToSpeech.setLanguage(locale);
+            if (availability != TextToSpeech.LANG_MISSING_DATA && availability != TextToSpeech.LANG_NOT_SUPPORTED) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void addTtsLocaleCandidate(ArrayList<Locale> candidates, Locale locale) {
+        if (locale == null) {
+            return;
+        }
+        for (int i = 0; i < candidates.size(); i++) {
+            Locale existing = candidates.get(i);
+            if (existing != null && existing.toString().equals(locale.toString())) {
+                return;
+            }
+        }
+        candidates.add(locale);
+    }
+
+    private Locale resolveConfiguredAppLocale() {
+        String configuredLanguage = config != null ? config.getAppLanguage() : "";
+        if (configuredLanguage == null || configuredLanguage.trim().length() == 0) {
+            return null;
+        }
+        return new Locale(configuredLanguage);
+    }
+
+    private Locale detectTtsLocale(String text) {
+        if (text == null || text.length() == 0) {
+            return null;
+        }
+        boolean hasCyrillic = false;
+        boolean hasLatin = false;
+        for (int i = 0; i < text.length();) {
+            int codePoint = text.codePointAt(i);
+            i += Character.charCount(codePoint);
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(codePoint);
+            if (block == Character.UnicodeBlock.CYRILLIC || block == Character.UnicodeBlock.CYRILLIC_SUPPLEMENTARY) {
+                hasCyrillic = true;
+            } else if ((codePoint >= 'A' && codePoint <= 'Z') || (codePoint >= 'a' && codePoint <= 'z')) {
+                hasLatin = true;
+            }
+        }
+        if (hasCyrillic) {
+            return new Locale("ru");
+        }
+        if (hasLatin) {
+            return Locale.ENGLISH;
+        }
+        return null;
+    }
+
+    private void resetTextToSpeechEngine() {
+        if (textToSpeech != null) {
+            try {
+                textToSpeech.stop();
+            } catch (Exception ignored) {
+            }
+            try {
+                textToSpeech.shutdown();
+            } catch (Exception ignored) {
+            }
+        }
+        textToSpeech = null;
+        ttsReady = false;
+        ttsInitializing = false;
+        activeTtsUtteranceId = null;
+    }
+
+    private String buildSpeakableTextForTts(String source) {
+        String plain = extractPlainAssistantTextForTts(source);
+        plain = stripThinkBlocksForTts(plain);
+        plain = dropLeadingMetadataLinesForTts(plain);
+        plain = stripLeadingAssistantLabelForTts(plain);
+        plain = stripEmojiForTts(plain);
+        plain = plain.replaceAll("[ \\t\\x0B\\f]+", " ").trim();
+        if (plain.length() != 0) {
+            return plain;
+        }
+        return stripEmojiForTts(source != null ? source : "").trim();
+    }
+
+    private String stripThinkBlocksForTts(String source) {
+        if (source == null || source.length() == 0) {
+            return "";
+        }
+        return source
+                .replaceAll("(?is)<think>.*?</think>", " ")
+                .replace("<think>", " ")
+                .replace("</think>", " ");
+    }
+
+    private String dropLeadingMetadataLinesForTts(String source) {
+        if (source == null || source.length() == 0) {
+            return "";
+        }
+        String[] lines = source.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1);
+        int start = 0;
+        while (start < lines.length) {
+            String trimmed = lines[start] != null ? lines[start].trim() : "";
+            if (trimmed.length() == 0 && start < lines.length - 1) {
+                start++;
+                continue;
+            }
+            if (!isLeadingMetadataLineForTts(trimmed) || start >= lines.length - 1) {
+                break;
+            }
+            start++;
+        }
+        StringBuffer out = new StringBuffer(source.length());
+        for (int i = start; i < lines.length; i++) {
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append(lines[i]);
+        }
+        return out.toString().trim();
+    }
+
+    private boolean isLeadingMetadataLineForTts(String line) {
+        if (line == null || line.length() == 0) {
+            return false;
+        }
+        String lower = line.toLowerCase(Locale.US);
+        return lower.startsWith("model:")
+                || lower.startsWith("provider:")
+                || lower.startsWith("nickname:")
+                || lower.startsWith("role:")
+                || lower.startsWith("assistant:")
+                || lower.startsWith("assistant ");
+    }
+
+    private String stripLeadingAssistantLabelForTts(String source) {
+        if (source == null || source.length() == 0) {
+            return "";
+        }
+        String trimmed = source.trim();
+        String lower = trimmed.toLowerCase(Locale.US);
+        if (lower.startsWith("assistant:")) {
+            return trimmed.substring("assistant:".length()).trim();
+        }
+        if (lower.startsWith("assistant ")) {
+            return trimmed.substring("assistant ".length()).trim();
+        }
+        return trimmed;
+    }
+
+    private String extractPlainAssistantTextForTts(String source) {
+        if (source == null) {
+            return "";
+        }
+        String trimmed = source.trim();
+        if (trimmed.length() == 0) {
+            return "";
+        }
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            try {
+                JSONObject object = JSON.getObject(trimmed);
+                String content = extractJsonSpeakableText(object);
+                if (content != null && content.trim().length() != 0) {
+                    return content;
+                }
+            } catch (Exception ignored) {
+                try {
+                    cc.nnproject.json.JSONArray array = JSON.getArray(trimmed);
+                    String content = extractJsonArraySpeakableText(array);
+                    if (content != null && content.trim().length() != 0) {
+                        return content;
+                    }
+                } catch (Exception ignoredAgain) {
+                }
+            }
+        }
+        return source;
+    }
+
+    private String extractJsonSpeakableText(JSONObject object) {
+        if (object == null) {
+            return null;
+        }
+        String[] directKeys = new String[] {"content", "text", "message", "response", "output_text"};
+        for (int i = 0; i < directKeys.length; i++) {
+            String value = tryGetJsonString(object, directKeys[i]);
+            if (value != null && value.trim().length() != 0 && !looksLikeJsonStructure(value)) {
+                return value;
+            }
+        }
+        try {
+            cc.nnproject.json.JSONArray choices = object.getArray("choices");
+            String fromChoices = extractJsonArraySpeakableText(choices);
+            if (fromChoices != null && fromChoices.trim().length() != 0) {
+                return fromChoices;
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            JSONObject message = object.getObject("message");
+            String fromMessage = extractJsonSpeakableText(message);
+            if (fromMessage != null && fromMessage.trim().length() != 0) {
+                return fromMessage;
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            cc.nnproject.json.JSONArray contentArray = object.getArray("content");
+            String fromContent = extractJsonArraySpeakableText(contentArray);
+            if (fromContent != null && fromContent.trim().length() != 0) {
+                return fromContent;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private String extractJsonArraySpeakableText(cc.nnproject.json.JSONArray array) {
+        if (array == null || array.size() == 0) {
+            return null;
+        }
+        StringBuffer buffer = new StringBuffer();
+        for (int i = 0; i < array.size(); i++) {
+            try {
+                JSONObject item = array.getObject(i);
+                String text = extractJsonSpeakableText(item);
+                if (text != null && text.trim().length() != 0) {
+                    if (buffer.length() > 0) {
+                        buffer.append('\n');
+                    }
+                    buffer.append(text);
+                }
+                continue;
+            } catch (Exception ignored) {
+            }
+            try {
+                String text = array.getString(i);
+                if (text != null && text.trim().length() != 0 && !looksLikeJsonStructure(text)) {
+                    if (buffer.length() > 0) {
+                        buffer.append('\n');
+                    }
+                    buffer.append(text);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return buffer.length() == 0 ? null : buffer.toString();
+    }
+
+    private String tryGetJsonString(JSONObject object, String key) {
+        if (object == null || key == null || !object.has(key)) {
+            return null;
+        }
+        try {
+            return object.getString(key);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean looksLikeJsonStructure(String value) {
+        if (value == null) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return (trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"));
+    }
+
+    private String normalizeMarkdownForTts(String source) {
+        if (source == null || source.length() == 0) {
+            return "";
+        }
+        String[] lines = source.replace('\r', '\n').split("\n", -1);
+        StringBuffer out = new StringBuffer(source.length());
+        boolean inCodeBlock = false;
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            String trimmed = line.trim();
+            if (trimmed.startsWith("```")) {
+                inCodeBlock = !inCodeBlock;
+                continue;
+            }
+            if (inCodeBlock) {
+                continue;
+            }
+            String normalizedLine = normalizeMarkdownLineForTts(line);
+            if (isMetadataLikeTtsLine(normalizedLine)) {
+                continue;
+            }
+            if (normalizedLine.length() == 0) {
+                if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') {
+                    out.append('\n');
+                }
+                continue;
+            }
+            if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') {
+                out.append('\n');
+            }
+            out.append(normalizedLine);
+        }
+        return out.toString();
+    }
+
+    private String normalizeMarkdownLineForTts(String line) {
+        String trimmed = line != null ? line.trim() : "";
+        if (trimmed.length() == 0) {
+            return "";
+        }
+        String lower = trimmed.toLowerCase(Locale.US);
+        if (lower.startsWith("assistant:")) {
+            trimmed = trimmed.substring("assistant:".length()).trim();
+        } else if (lower.startsWith("assistant ")) {
+            trimmed = trimmed.substring("assistant ".length()).trim();
+        }
+        int headingLevel = 0;
+        while (headingLevel < trimmed.length() && headingLevel < 6 && trimmed.charAt(headingLevel) == '#') {
+            headingLevel++;
+        }
+        if (headingLevel > 0 && headingLevel < trimmed.length() && trimmed.charAt(headingLevel) == ' ') {
+            trimmed = trimmed.substring(headingLevel + 1).trim();
+        }
+        if (trimmed.startsWith("> ")) {
+            trimmed = trimmed.substring(2).trim();
+        }
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ")) {
+            trimmed = trimmed.substring(2).trim();
+        } else {
+            int orderedIndex = 0;
+            while (orderedIndex < trimmed.length() && Character.isDigit(trimmed.charAt(orderedIndex))) {
+                orderedIndex++;
+            }
+            if (orderedIndex > 0 && orderedIndex + 1 < trimmed.length()
+                    && trimmed.charAt(orderedIndex) == '.'
+                    && trimmed.charAt(orderedIndex + 1) == ' ') {
+                trimmed = trimmed.substring(orderedIndex + 2).trim();
+            }
+        }
+        return stripInlineMarkdownForTts(trimmed);
+    }
+
+    private String stripInlineMarkdownForTts(String text) {
+        if (text == null || text.length() == 0) {
+            return "";
+        }
+        StringBuffer out = new StringBuffer(text.length());
+        for (int i = 0; i < text.length();) {
+            if (text.startsWith("~~", i) || text.startsWith("**", i) || text.startsWith("__", i)) {
+                i += 2;
+                continue;
+            }
+            char ch = text.charAt(i);
+            if (ch == '*' || ch == '_' || ch == '`') {
+                i++;
+                continue;
+            }
+            if (ch == '[') {
+                int labelEnd = text.indexOf("](", i + 1);
+                if (labelEnd != -1) {
+                    int urlEnd = text.indexOf(')', labelEnd + 2);
+                    if (urlEnd != -1) {
+                        out.append(text.substring(i + 1, labelEnd));
+                        i = urlEnd + 1;
+                        continue;
+                    }
+                }
+            }
+            if (ch == '|') {
+                out.append(' ');
+                i++;
+                continue;
+            }
+            int codePoint = text.codePointAt(i);
+            out.append(Character.toChars(codePoint));
+            i += Character.charCount(codePoint);
+        }
+        return out.toString()
+                .replace("------------", " ")
+                .replaceAll("(?is)<[^>]+>", " ")
+                .replaceAll("https?://\\S+", " ")
+                .replaceAll("(?i)\\b(role|assistant|system|debug|metadata|layout|contentdescription)\\s*[:=]\\s*", " ")
+                .trim();
+    }
+
+    private boolean isMetadataLikeTtsLine(String line) {
+        if (line == null) {
+            return false;
+        }
+        String trimmed = line.trim();
+        if (trimmed.length() == 0) {
+            return false;
+        }
+        String lower = trimmed.toLowerCase(Locale.US);
+        if (lower.startsWith("model:")
+                || lower.startsWith("provider:")
+                || lower.startsWith("reasoning:")
+                || lower.startsWith("thinking:")
+                || lower.startsWith("markdown:")
+                || lower.startsWith("content:")
+                || lower.startsWith("response:")) {
+            return true;
+        }
+        if (trimmed.length() > 96) {
+            return false;
+        }
+        String compact = lower.replaceAll("[\\s\\-_/.:()\\[\\]{}]+", " ").trim();
+        if (compact.length() == 0) {
+            return true;
+        }
+        if (compact.indexOf('!') != -1 || compact.indexOf('?') != -1) {
+            return false;
+        }
+        String[] tokens = compact.split("\\s+");
+        if (tokens.length > 8) {
+            return false;
+        }
+        int metadataTokens = 0;
+        for (int i = 0; i < tokens.length; i++) {
+            String token = tokens[i];
+            if (token.length() == 0) {
+                continue;
+            }
+            if ("gpt".equals(token) || token.startsWith("gpt-")
+                    || "gemini".equals(token)
+                    || "google".equals(token)
+                    || "claude".equals(token)
+                    || "openai".equals(token)
+                    || "openrouter".equals(token)
+                    || "voidai".equals(token)
+                    || "ollama".equals(token)
+                    || "localai".equals(token)
+                    || "llama".equals(token)
+                    || "studio".equals(token)
+                    || "lm".equals(token)
+                    || "model".equals(token)
+                    || "provider".equals(token)
+                    || "material".equals(token)
+                    || "markdown".equals(token)
+                    || "layout".equals(token)
+                    || "service".equals(token)
+                    || "strings".equals(token)
+                    || "ui".equals(token)
+                    || "ux".equals(token)
+                    || token.matches("^[a-z]+\\.[a-z0-9._-]+$")) {
+                metadataTokens++;
+            }
+        }
+        return metadataTokens > 0 && metadataTokens >= tokens.length - 1;
     }
 
     private void stopSpeakingMessage(Message message) {
+        activeTtsUtteranceId = null;
         if (textToSpeech != null) {
             textToSpeech.stop();
         }
@@ -1371,11 +1915,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        if (textToSpeech != null) {
-            textToSpeech.stop();
-            textToSpeech.shutdown();
-            textToSpeech = null;
-        }
+        resetTextToSpeechEngine();
         super.onDestroy();
     }
 
@@ -1410,6 +1950,48 @@ public class MainActivity extends AppCompatActivity {
         return type == Character.OTHER_SYMBOL;
     }
 
+    private boolean maybeRetryWithoutStreaming(String errorMsg) {
+        if (!currentResponseUsedStreaming || currentResponseRetriedWithoutStreaming) {
+            return false;
+        }
+        String normalized = errorMsg != null ? errorMsg.toLowerCase(Locale.US) : "";
+        if (normalized.length() == 0) {
+            return false;
+        }
+        if (normalized.indexOf("socket closed") == -1
+                && normalized.indexOf("unexpected") == -1
+                && normalized.indexOf("malformed") == -1
+                && normalized.indexOf("timeout") == -1
+                && normalized.indexOf("json") == -1
+                && normalized.indexOf("stream") == -1
+                && normalized.indexOf("connection") == -1
+                && normalized.indexOf("eof") == -1
+                && normalized.indexOf("reset") == -1) {
+            return false;
+        }
+        currentResponseRetriedWithoutStreaming = true;
+        config.setProviderStreamSupport(config.getConfig().getBaseUrl(), ConfigManager.STREAM_SUPPORT_FALSE);
+        List<Message> messages = MessageManager.getInstance().getMessages();
+        if (activeAssistantMessage != null) {
+            messages.remove(activeAssistantMessage);
+            chatRepository.deleteMessage(activeAssistantMessage.getMessageId());
+        }
+        stopReasoningTicker();
+        cancelResponseLoaderTicker();
+        activeAssistantMessage = null;
+        activeReasoningStartTime = 0L;
+        thinkBuffer.setLength(0);
+        contentBuffer.setLength(0);
+        isThinkingState = false;
+        currentStream = null;
+        adapter.notifyDataSetChanged();
+        updateEmptyState();
+        refreshChatList();
+        Toast.makeText(this, R.string.streaming_fallback_message, Toast.LENGTH_SHORT).show();
+        requestAssistantResponse(lastRequestedThinkingEnabled, false, Boolean.FALSE);
+        return true;
+    }
+
     private void readStream(InputStream inputStream, final Message msg, final boolean thinkingEnabled) throws IOException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, "UTF-8"));
         String line;
@@ -1436,9 +2018,10 @@ public class MainActivity extends AppCompatActivity {
                         hasUpdates = true;
                     }
                 } else {
-                    if (reasoningStr != null) contentBuffer.append(reasoningStr);
-                    if (contentStr != null) contentBuffer.append(contentStr);
-                    hasUpdates = (reasoningStr != null || contentStr != null);
+                    if (contentStr != null && contentStr.length() > 0) {
+                        processContentWithTags(contentStr);
+                        hasUpdates = true;
+                    }
                 }
                 long currentTime = System.currentTimeMillis();
                 if (hasUpdates && (currentTime - lastUpdateTime >= UPDATE_DELAY_MS)) {
@@ -1452,6 +2035,9 @@ public class MainActivity extends AppCompatActivity {
         if (isCancelled) return;
         runOnUiThread(new Runnable() {
             public void run() {
+                if (currentResponseUsedStreaming) {
+                    config.setProviderStreamSupport(config.getConfig().getBaseUrl(), ConfigManager.STREAM_SUPPORT_TRUE);
+                }
                 updateStreamUI(msg, thinkingEnabled, true);
                 resetUIState();
             }
@@ -1497,7 +2083,12 @@ public class MainActivity extends AppCompatActivity {
         String displayContent = contentBuffer.toString();
         String displayThink = thinkBuffer.toString();
         msg.setContent(displayContent);
+        msg.setContentFinal(isFinal ? displayContent : "");
         msg.setReasoningUsed(thinkingEnabled);
+        if (isFinal) {
+            Log.d(TAG, "Assistant final text ready from stream messageId=" + msg.getMessageId()
+                    + " text=" + quoteForLog(msg.getContentFinal()));
+        }
         if (thinkingEnabled) {
             adapter.setResponseLoaderVisible(msg, false);
             adapter.updateReasoningState(msg, displayThink, true, !isFinal, getReasoningDurationSeconds());
@@ -1830,6 +2421,19 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return inSampleSize;
+    }
+
+    private String quoteForLog(String value) {
+        if (value == null) {
+            return "\"\"";
+        }
+        String escaped = value
+                .replace("\\", "\\\\")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+                .replace("\"", "\\\"");
+        return "\"" + escaped + "\"";
     }
 
     private String extractJSONReasoning(JSONObject delta) {

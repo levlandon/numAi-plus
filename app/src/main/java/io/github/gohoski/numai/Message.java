@@ -12,6 +12,7 @@ class Message {
     private long timestamp = 0L;
     private Role role = Role.USER;
     private String content = "";
+    private String contentFinal = "";
     private String llm;
     List<String> inputImages;
     private List<ChatAttachment> attachments;
@@ -68,6 +69,10 @@ class Message {
         return content;
     }
 
+    String getContentFinal() {
+        return contentFinal != null ? contentFinal : "";
+    }
+
     String getLlm() {
         return llm;
     }
@@ -112,6 +117,10 @@ class Message {
     //set content completely
     void setContent(String newContent) {
         this.content = newContent;
+    }
+
+    void setContentFinal(String contentFinal) {
+        this.contentFinal = contentFinal;
     }
 
     boolean isReasoningUsed() {

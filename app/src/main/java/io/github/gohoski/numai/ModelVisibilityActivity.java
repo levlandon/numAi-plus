@@ -3,8 +3,6 @@ package io.github.gohoski.numai;
 import android.content.Context;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
-import android.support.v7.widget.Toolbar;
-import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -39,11 +37,6 @@ public class ModelVisibilityActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_model_visibility);
-        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
-        setSupportActionBar(toolbar);
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        }
 
         context = this;
         config = ConfigManager.getInstance(this);
@@ -65,6 +58,12 @@ public class ModelVisibilityActivity extends AppCompatActivity {
 
         modelsList = (ListView) findViewById(R.id.models_list);
         refreshButton = findViewById(R.id.refresh_models_button);
+        findViewById(R.id.back_button).setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                finish();
+            }
+        });
         adapter = new ModelVisibilityAdapter();
         modelsList.setAdapter(adapter);
         refreshButton.setOnClickListener(new View.OnClickListener() {
@@ -97,15 +96,6 @@ public class ModelVisibilityActivity extends AppCompatActivity {
         if (models.isEmpty()) {
             refreshModels(true);
         }
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == android.R.id.home) {
-            finish();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
     }
 
     private void restoreCachedModels() {
