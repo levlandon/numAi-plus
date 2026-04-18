@@ -8,6 +8,10 @@ NumAI Plus — современный форк [NumAI](https://github.com/gohosk
 
 NumAI Plus ориентирован на **Android 4.0+**.
 
+## Сообщество
+
+Telegram (RU): https://t.me/lev_landon)
+Twitter / X (EN): https://x.com/lev_landon
 
 ## Скриншоты
 

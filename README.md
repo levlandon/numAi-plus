@@ -9,6 +9,14 @@ This fork takes a different direction: a richer client, a cleaner UI, multi-chat
 NumAI Plus is focused on **Android 4.0+**.
 
 
+
+## Community
+
+Telegram (RU): https://t.me/lev_landon
+Twitter / X (EN): https://x.com/lev_landon
+
+
+
 ## Screenshots
 
 <img src="img/scr1.jpg" width="300"/>
